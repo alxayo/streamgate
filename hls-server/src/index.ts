@@ -7,9 +7,11 @@ import { ContentResolver } from './services/content-resolver.js';
 import { UpstreamProxy } from './services/upstream-proxy.js';
 import { SegmentCache } from './services/segment-cache.js';
 import { InflightDeduplicator } from './services/inflight-dedup.js';
+import { CacheCleanupService } from './services/cache-cleanup.js';
 import { createJwtAuthMiddleware } from './middleware/jwt-auth.js';
 import { createCorsMiddleware } from './middleware/cors-config.js';
 import { createRequestLogger } from './middleware/request-logger.js';
+import { createErrorHandler } from './middleware/error-handler.js';
 import { createStreamRoutes } from './routes/streams.js';
 import { createHealthRoute } from './routes/health.js';
 import { createAdminCacheRoute } from './routes/admin-cache.js';
@@ -25,6 +27,7 @@ const contentResolver = new ContentResolver(config);
 const upstreamProxy = config.upstreamOrigin ? new UpstreamProxy(config) : null;
 const segmentCache = new SegmentCache(config);
 const inflightDedup = new InflightDeduplicator();
+const cacheCleanup = new CacheCleanupService(config);
 
 // Middleware
 app.use(createCorsMiddleware(config));
@@ -41,8 +44,12 @@ const jwtAuth = createJwtAuthMiddleware(jwtVerifier, revocationCache);
 app.use('/streams', jwtAuth);
 app.use(createStreamRoutes(contentResolver, upstreamProxy, segmentCache, inflightDedup));
 
+// Error handler (must be last)
+app.use(createErrorHandler());
+
 // Start services
 syncService.start();
+cacheCleanup.start();
 
 const server = app.listen(config.port, () => {
   console.log(`HLS Media Server listening on port ${config.port}`);
@@ -53,6 +60,7 @@ const server = app.listen(config.port, () => {
 function shutdown() {
   console.log('Shutting down...');
   syncService.stop();
+  cacheCleanup.stop();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);
