@@ -2,8 +2,12 @@
 
 A ticket-gated HTML5 video streaming platform with two independently deployable services sharing JWT-based playback authentication.
 
-See [PDR.md](PDR.md) for full specification, data model, API contracts, and deployment topologies.
-See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for development task breakdown.
+## 📚 Documentation
+
+- **[GETTING_STARTED.md](GETTING_STARTED.md)** — **Start here!** Complete step-by-step guide to set up and run the system locally
+- **[PDR.md](PDR.md)** — Full product specification, data model, API contracts, and deployment topologies
+- **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** — Development task breakdown and work streams
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** — Production deployment guide (Docker, cloud platforms)
 
 ## Architecture
 
@@ -20,43 +24,36 @@ See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for development task breakd
 
 ## Quick Start
 
-### 1. Environment Setup
+> **👉 For detailed setup instructions, see [GETTING_STARTED.md](GETTING_STARTED.md)**
+
+### TL;DR
 
 ```bash
-cp .env.example .env
-# Edit .env with your configuration:
-# - Generate PLAYBACK_SIGNING_SECRET (min 32 random characters)
-# - Generate INTERNAL_API_KEY (random string)
-# - Generate ADMIN_PASSWORD_HASH: npm run hash-password
-```
-
-### 2. Install Dependencies
-
-```bash
+# 1. Install dependencies
 npm install
-```
 
-### 3. Platform App
-
-```bash
-cd platform
-npx prisma migrate dev    # Initialize/migrate database
-npm run dev               # Next.js dev server on :3000
-```
-
-### 4. HLS Media Server
-
-```bash
-cd hls-server
-npm run dev               # Express dev server on :4000
-```
-
-### 5. Generate Admin Password Hash
-
-```bash
+# 2. Generate secrets and admin password
 npm run hash-password
-# Follow the prompt, then copy the output to ADMIN_PASSWORD_HASH in .env
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env with generated secrets
+
+# 4. Initialize database
+cd platform
+npx prisma migrate dev
+npx prisma db seed        # Optional: sample data
+
+# 5. Start services (in separate terminals)
+cd platform && npm run dev      # Terminal 1: Port 3000
+cd hls-server && npm run dev    # Terminal 2: Port 4000
 ```
+
+**Access the application:**
+- Viewer Portal: http://localhost:3000
+- Admin Console: http://localhost:3000/admin
+- HLS Server Health: http://localhost:4000/health
 
 ## Project Structure
 
@@ -92,3 +89,11 @@ See `.env.example` for a complete reference with documentation.
 - Changes to `shared/` are immediately available in both services (no build step)
 - Use `npx prisma studio` to inspect the database visually
 - HLS test streams should be placed in `./streams/<eventId>/`
+hls-server/streams/<eventId>/`
+
+## Need Help?
+
+- **Setup issues?** See [GETTING_STARTED.md](GETTING_STARTED.md) — Comprehensive troubleshooting section
+- **API questions?** See [GETTING_STARTED.md#api-reference](GETTING_STARTED.md#api-reference) — Complete API documentation
+- **Deployment?** See [DEPLOYMENT.md](DEPLOYMENT.md) — Docker & cloud deployment guides
+- **Architecture details?** See [PDR.md](PDR.md) — Full product specification
