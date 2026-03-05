@@ -33,7 +33,9 @@ export function createJwtAuthMiddleware(
       }
 
       // Step 2-4: Verify signature, expiry, and path prefix
-      const claims = await jwtVerifier.verify(token, req.path);
+      // Use req.baseUrl + req.path to get the full path (Express strips mountpoint from req.path)
+      const fullPath = req.baseUrl + req.path;
+      const claims = await jwtVerifier.verify(token, fullPath);
 
       // Step 5: Handle probe JWTs (HEAD only, PDR §10.1)
       if (claims.probe && req.method !== 'HEAD') {
