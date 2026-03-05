@@ -1,0 +1,169 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Loader2 } from 'lucide-react';
+
+interface EventFormProps {
+  initialData?: {
+    id: string;
+    title: string;
+    description: string | null;
+    streamUrl: string | null;
+    posterUrl: string | null;
+    startsAt: string;
+    endsAt: string;
+    accessWindowHours: number;
+  };
+}
+
+export function EventForm({ initialData }: EventFormProps) {
+  const router = useRouter();
+  const isEditing = !!initialData;
+
+  const [formData, setFormData] = useState({
+    title: initialData?.title || '',
+    description: initialData?.description || '',
+    streamUrl: initialData?.streamUrl || '',
+    posterUrl: initialData?.posterUrl || '',
+    startsAt: initialData?.startsAt ? new Date(initialData.startsAt).toISOString().slice(0, 16) : '',
+    endsAt: initialData?.endsAt ? new Date(initialData.endsAt).toISOString().slice(0, 16) : '',
+    accessWindowHours: initialData?.accessWindowHours || 48,
+  });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const url = isEditing ? `/api/admin/events/${initialData.id}` : '/api/admin/events';
+      const method = isEditing ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          startsAt: new Date(formData.startsAt).toISOString(),
+          endsAt: new Date(formData.endsAt).toISOString(),
+          description: formData.description || null,
+          streamUrl: formData.streamUrl || null,
+          posterUrl: formData.posterUrl || null,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        router.push(`/admin/events/${data.data.id}`);
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Failed to save event');
+      }
+    } catch {
+      setError('Network error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
+      <div className="space-y-2">
+        <Label className="text-gray-700">Title *</Label>
+        <Input
+          value={formData.title}
+          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+          className="bg-white border-gray-300 text-gray-900"
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-gray-700">Description</Label>
+        <textarea
+          value={formData.description}
+          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-accent-blue"
+          rows={3}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label className="text-gray-700">Start Date/Time *</Label>
+          <Input
+            type="datetime-local"
+            value={formData.startsAt}
+            onChange={(e) => setFormData({ ...formData, startsAt: e.target.value })}
+            className="bg-white border-gray-300 text-gray-900"
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-gray-700">End Date/Time *</Label>
+          <Input
+            type="datetime-local"
+            value={formData.endsAt}
+            onChange={(e) => setFormData({ ...formData, endsAt: e.target.value })}
+            className="bg-white border-gray-300 text-gray-900"
+            required
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-gray-700">Access Window (hours after event ends)</Label>
+        <Input
+          type="number"
+          value={formData.accessWindowHours}
+          onChange={(e) => setFormData({ ...formData, accessWindowHours: parseInt(e.target.value) || 48 })}
+          className="bg-white border-gray-300 text-gray-900 w-32"
+          min={1}
+          max={168}
+        />
+        <p className="text-xs text-gray-500">1-168 hours (default: 48)</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-gray-700">Stream URL Override (optional)</Label>
+        <Input
+          value={formData.streamUrl}
+          onChange={(e) => setFormData({ ...formData, streamUrl: e.target.value })}
+          className="bg-white border-gray-300 text-gray-900"
+          placeholder="https://..."
+        />
+        <p className="text-xs text-gray-500">
+          Leave blank for convention-based paths. Only needed for non-standard upstream origins.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-gray-700">Poster URL (optional)</Label>
+        <Input
+          value={formData.posterUrl}
+          onChange={(e) => setFormData({ ...formData, posterUrl: e.target.value })}
+          className="bg-white border-gray-300 text-gray-900"
+          placeholder="https://..."
+        />
+      </div>
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      <div className="flex gap-3">
+        <Button type="submit" disabled={loading}>
+          {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+          {isEditing ? 'Update Event' : 'Create Event'}
+        </Button>
+        <Button type="button" variant="outline" className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50" onClick={() => router.back()}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
