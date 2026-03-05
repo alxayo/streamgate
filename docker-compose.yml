@@ -1,0 +1,36 @@
+services:
+  platform:
+    build:
+      context: .
+      dockerfile: platform/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "file:./dev.db"
+      PLAYBACK_SIGNING_SECRET: "dev-secret-change-me-in-production-32chars"
+      INTERNAL_API_KEY: "dev-internal-api-key-change-me"
+      ADMIN_PASSWORD_HASH: "$2b$12$LJ3m4ys3Lk0TSwMBQWJJF.FzHqKn5A2n3MpGkbP0U7Q67rJFEyxGq"  # password: admin123
+      HLS_SERVER_BASE_URL: "http://localhost:4000"
+      NEXT_PUBLIC_APP_NAME: "StreamGate"
+      SESSION_TIMEOUT_SECONDS: "60"
+    volumes:
+      - platform-data:/app/platform/prisma
+
+  hls-server:
+    build:
+      context: .
+      dockerfile: hls-server/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      PLAYBACK_SIGNING_SECRET: "dev-secret-change-me-in-production-32chars"
+      INTERNAL_API_KEY: "dev-internal-api-key-change-me"
+      PLATFORM_APP_URL: "http://platform:3000"
+      STREAM_ROOT: "/streams"
+      CORS_ALLOWED_ORIGIN: "http://localhost:3000"
+      PORT: "4000"
+    volumes:
+      - ./streams:/streams
+
+volumes:
+  platform-data:
