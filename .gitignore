@@ -8,13 +8,19 @@ node_modules/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 *.sqlite
-prisma/migrations/*/migration_lock.toml
 
 # Build outputs
 dist/
 .next/
 out/
+*.tsbuildinfo
+
+# Generated code
+platform/src/generated/
 
 # Coverage
 coverage/
@@ -25,19 +31,26 @@ coverage/
 # IDE
 .vscode/settings.json
 .idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Debug
+# Debug / logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+*.log
 
-# Test
-*.tsbuildinfo
-
-# Streams (media files)
+# Streams / media files
 streams/
 test-streams/
+*.ts.tmp
+
+# Package manager lock (kept, but ignore alternatives)
+yarn.lock
+pnpm-lock.yaml
