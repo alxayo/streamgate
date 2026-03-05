@@ -13,7 +13,7 @@ export function createAdminCacheRoute(segmentCache: SegmentCache, config: Server
       return;
     }
 
-    const { eventId } = req.params;
+    const eventId = req.params.eventId as string;
     segmentCache
       .clearEvent(eventId)
       .then(() => {

@@ -27,9 +27,9 @@ export function createStreamRoutes(
 
   router.get('/streams/:eventId/*', async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { eventId } = req.params;
+      const eventId = req.params.eventId as string;
       // Express wildcard param
-      const wildcardPath = req.params[0];
+      const wildcardPath = req.params[0] as string | undefined;
       if (!wildcardPath) {
         res.status(404).json({ error: 'Not found' });
         return;
@@ -156,10 +156,8 @@ export function createStreamRoutes(
 
   // Support HEAD method
   router.head('/streams/:eventId/*', async (req: AuthenticatedRequest, res: Response) => {
-    // HEAD is handled in the same handler above via req.method check
-    // Express routes HEAD differently - redirect to same handler
-    const { eventId } = req.params;
-    const wildcardPath = req.params[0];
+    const eventId = req.params.eventId as string;
+    const wildcardPath = req.params[0] as string | undefined;
     if (!wildcardPath) {
       res.status(404).json({ error: 'Not found' });
       return;
