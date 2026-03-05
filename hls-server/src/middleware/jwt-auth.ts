@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { JwtVerifier } from '../services/jwt-verifier.js';
-import type { RevocationCache } from '../services/revocation-cache.js';
+import type { RevocationCache } from '../services/revocation-cache';
 import type { AuthenticatedRequest } from '../types.js';
 
 /**
