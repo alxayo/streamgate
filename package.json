@@ -1,0 +1,13 @@
+{
+  "name": "video-streaming-platform",
+  "private": true,
+  "workspaces": ["shared", "platform", "hls-server"],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  }
+}
