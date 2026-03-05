@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { loadConfig } from './config.js';
 import { JwtVerifier } from './services/jwt-verifier.js';
