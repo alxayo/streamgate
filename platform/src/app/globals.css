@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --cinema-black: 0 0% 12%;
+    --charcoal: 0 0% 18%;
+    --accent-blue: 217 91% 60%;
+  }
+}
