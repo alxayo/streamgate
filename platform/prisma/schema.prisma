@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Event {
+  id                String   @id @default(uuid())
+  title             String
+  description       String?
+  streamUrl         String?
+  posterUrl         String?
+  startsAt          DateTime
+  endsAt            DateTime
+  accessWindowHours Int      @default(48)
+  isActive          Boolean  @default(true)
+  isArchived        Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tokens Token[]
+}
+
+model Token {
+  id         String    @id @default(uuid())
+  code       String    @unique
+  eventId    String
+  label      String?
+  isRevoked  Boolean   @default(false)
+  revokedAt  DateTime?
+  redeemedAt DateTime?
+  redeemedIp String?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  event          Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  activeSessions ActiveSession[]
+
+  @@index([eventId])
+  @@index([code])
+  @@index([isRevoked])
+}
+
+model ActiveSession {
+  id            String   @id @default(uuid())
+  tokenId       String
+  sessionId     String   @unique
+  lastHeartbeat DateTime @default(now())
+  clientIp      String
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  token Token @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@index([tokenId])
+  @@index([sessionId])
+  @@index([lastHeartbeat])
+}
