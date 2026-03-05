@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { TokenEntry } from '@/components/viewer/token-entry';
+import { PlayerScreen } from '@/components/viewer/player-screen';
+import { Toaster } from '@/components/ui/toaster';
 import type { TokenValidationResponse } from '@streaming/shared';
 
 export default function Home() {
@@ -11,14 +13,15 @@ export default function Home() {
   } | null>(null);
 
   if (validationData) {
-    // Will be replaced with PlayerScreen in P-12
     return (
-      <main className="flex min-h-screen items-center justify-center bg-cinema-black">
-        <div className="text-center text-white">
-          <h1 className="text-2xl font-semibold mb-2">{validationData.data.event.title}</h1>
-          <p className="text-gray-400">Player loading...</p>
-        </div>
-      </main>
+      <>
+        <PlayerScreen
+          data={validationData.data}
+          code={validationData.code}
+          onBack={() => setValidationData(null)}
+        />
+        <Toaster />
+      </>
     );
   }
 
@@ -28,6 +31,7 @@ export default function Home() {
         appName={process.env.NEXT_PUBLIC_APP_NAME || 'StreamGate'}
         onSuccess={(data, code) => setValidationData({ data, code })}
       />
+      <Toaster />
     </main>
   );
 }
