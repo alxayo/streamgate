@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
+// Force dynamic rendering — these API routes need the database
+export const dynamic = 'force-dynamic';
+
 // GET /api/admin/dashboard — Dashboard summary statistics
 export async function GET() {
   const now = new Date();

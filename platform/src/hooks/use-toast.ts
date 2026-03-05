@@ -2,15 +2,14 @@
 
 import * as React from 'react';
 
-import type { Toast } from '@/components/ui/toast';
-
 const TOAST_LIMIT = 3;
 const TOAST_REMOVE_DELAY = 5000;
 
-type ToasterToast = React.ComponentPropsWithoutRef<typeof Toast> & {
+type ToasterToast = {
   id: string;
-  title?: React.ReactNode;
-  description?: React.ReactNode;
+  title?: string;
+  description?: string;
+  variant?: 'default' | 'destructive';
   action?: React.ReactNode;
 };
 
@@ -87,8 +86,8 @@ function dispatch(action: Action) {
 }
 
 interface ToastOptions {
-  title?: React.ReactNode;
-  description?: React.ReactNode;
+  title?: string;
+  description?: string;
   variant?: 'default' | 'destructive';
   action?: React.ReactNode;
 }

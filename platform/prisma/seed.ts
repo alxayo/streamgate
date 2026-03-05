@@ -1,4 +1,4 @@
-import { PrismaClient } from '../generated/prisma/client.js';
+import { PrismaClient } from '@prisma/client';
 import crypto from 'node:crypto';
 
 const prisma = new PrismaClient();

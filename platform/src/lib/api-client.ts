@@ -42,26 +42,12 @@ export async function sendHeartbeat(jwt: string): Promise<HeartbeatResponse> {
 }
 
 export async function releaseSession(jwt: string): Promise<void> {
-  // Use sendBeacon if available, otherwise fetch with keepalive
-  const body = '';
+  // Use fetch with keepalive for reliable session release on page close
   const headers = { Authorization: `Bearer ${jwt}` };
-
-  if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-    // sendBeacon doesn't support custom headers, fall back to fetch with keepalive
-    fetch('/api/playback/release', {
-      method: 'POST',
-      headers,
-      keepalive: true,
-    }).catch(() => {
-      // Fire and forget
-    });
-    return;
-  }
 
   fetch('/api/playback/release', {
     method: 'POST',
     headers,
-    body,
     keepalive: true,
   }).catch(() => {
     // Fire and forget

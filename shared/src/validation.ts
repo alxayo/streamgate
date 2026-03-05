@@ -1,4 +1,4 @@
-import { ACCESS_WINDOW_MIN_HOURS, ACCESS_WINDOW_MAX_HOURS } from './constants.js';
+import { ACCESS_WINDOW_MIN_HOURS, ACCESS_WINDOW_MAX_HOURS } from './constants';
 
 /**
  * Sanitize and validate a token code input.
