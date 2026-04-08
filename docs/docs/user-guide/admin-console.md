@@ -1,0 +1,240 @@
+---
+sidebar_position: 5
+title: Admin Console
+---
+
+# Admin Console
+
+The Admin Console is StreamGate's management interface for event organizers. Create streaming events, generate and distribute access codes, monitor active viewers, and control access — all from a web-based dashboard.
+
+## Accessing the Admin Console
+
+Navigate to `/admin` on your StreamGate instance:
+
+```
+http://localhost:3000/admin
+```
+
+### Logging In
+
+Enter the admin password configured via the `ADMIN_PASSWORD_HASH` environment variable. The password is verified against a bcrypt hash — the plaintext password is never stored.
+
+:::info Session persistence
+After logging in, your session is maintained via an encrypted HTTP-only cookie (using `iron-session`). You'll stay logged in until you explicitly log out or the session cookie expires.
+:::
+
+### Forgot Your Password?
+
+The admin password is set via environment variable, not stored in the database. To reset it:
+
+```bash
+# Generate a new password hash
+npm run hash-password
+
+# Update ADMIN_PASSWORD_HASH in your .env file with the new hash
+# Restart the Platform App
+```
+
+---
+
+## Dashboard
+
+The dashboard provides an at-a-glance overview:
+
+- **Active Events** — Events currently within their start/end time window
+- **Upcoming Events** — Scheduled but not yet started
+- **Total Tokens** — Count of all generated tokens across events
+- **Active Sessions** — Currently watching viewers in real-time
+
+---
+
+## Managing Events
+
+### Creating an Event
+
+1. Click **"Create Event"** from the dashboard or events list
+2. Fill in the event details:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| **Title** | ✅ | Event name displayed to viewers (e.g., "Annual Conference 2025") |
+| **Description** | ❌ | Event details shown on the viewer portal |
+| **Starts At** | ✅ | When the live stream begins (date + time) |
+| **Ends At** | ✅ | When the live stream ends (date + time) |
+| **Access Window (hours)** | ✅ | Hours after `Ends At` that tokens remain valid for VOD rewatch (default: 48) |
+| **Stream URL** | ❌ | Override upstream URL for proxy mode (leave blank for convention-based paths) |
+| **Poster URL** | ❌ | Thumbnail image URL shown before the stream starts |
+
+3. Click **"Save"**
+
+:::tip Access window
+The access window controls how long viewers can rewatch after the live event ends. Set to `0` for live-only events with no rewatch. Set to `168` (one week) for extended access.
+:::
+
+### Editing an Event
+
+Click on an event from the events list to view its details, then click **"Edit"** to modify any field. Changes take effect immediately — existing viewers may need to refresh their player.
+
+:::warning Changing times
+If you shorten the event's end time, any tokens computed with the old end time will have their access window shortened accordingly. Token `expiresAt` is calculated as `endsAt + accessWindowHours`.
+:::
+
+### Event States
+
+| State | Meaning | Admin Action |
+|-------|---------|--------------|
+| **Active** | Event is enabled, tokens can be used | Default state |
+| **Deactivated** | All access suspended immediately | Toggle `isActive` off |
+| **Archived** | Hidden from default views, access may still work if within window | Toggle `isArchived` on |
+
+### Deactivating an Event
+
+Deactivating an event immediately suspends **all** access for that event:
+
+- All active viewers are disconnected (within 30 seconds, as the HLS server syncs its revocation cache)
+- No new tokens can be redeemed
+- Existing tokens for this event become non-functional
+
+To deactivate: Open the event → Click **"Deactivate"** (or toggle the Active switch off).
+
+To reactivate: Open the event → Click **"Activate"** (or toggle the Active switch on).
+
+### Deleting an Event
+
+Deleting an event permanently removes it and **all associated tokens**. This action cannot be undone.
+
+:::danger Permanent action
+Deletion cascades to all tokens and active sessions. Only delete events that are no longer needed. Consider archiving instead.
+:::
+
+---
+
+## Managing Tokens
+
+### Generating Tokens
+
+From an event's detail page:
+
+1. Click **"Generate Tokens"**
+2. Choose the quantity (1 to 500 per batch)
+3. Optionally add a **label** (e.g., "VIP Batch", "John Smith", "Marketing Team") — labels help you identify tokens later
+4. Click **"Generate"**
+
+Tokens are created using cryptographically secure random generation (`crypto.randomBytes`), producing 12-character alphanumeric codes (base62: `a-z`, `A-Z`, `0-9`).
+
+:::info Batch size limit
+You can generate up to **500 tokens** in a single batch. For larger quantities, run multiple batches. Token generation uses database transactions to ensure atomicity.
+:::
+
+### Token List
+
+The token list for each event shows all generated tokens with:
+
+- **Code** — The 12-character access code
+- **Label** — Admin-assigned label (if any)
+- **Status** — Current state (see below)
+- **Created** — When the token was generated
+- **Redeemed** — When first used (if applicable)
+- **Expires** — Expiration date/time
+
+#### Filtering and Searching
+
+- **Search** — Filter by token code or label
+- **Status filter** — Show only tokens with a specific status
+- **Sort** — Order by creation date, redemption date, or status
+
+### Token Statuses
+
+| Status | Icon | Meaning |
+|--------|------|---------|
+| **Unused** | 🔵 | Generated but never redeemed by a viewer |
+| **Redeemed** | 🟢 | Successfully used by a viewer at least once |
+| **Active** | 🟢 (pulsing) | A viewer is currently watching with this token |
+| **Expired** | ⚫ | Past the access window (`endsAt + accessWindowHours`) |
+| **Revoked** | 🔴 | Manually revoked by an admin |
+
+### Revoking Tokens
+
+Revocation immediately blocks a token from being used:
+
+#### Single Token Revocation
+1. Find the token in the list
+2. Click the **"Revoke"** action
+3. Confirm the revocation
+
+#### Bulk Revocation
+1. Select multiple tokens using checkboxes
+2. Click **"Revoke Selected"**
+3. Confirm the bulk action
+
+#### What Happens on Revocation
+
+- If the viewer is currently watching, their stream stops within **30 seconds** (next HLS server revocation sync cycle)
+- The token code can no longer be used to gain access
+- The revocation is synced to all HLS server instances via the revocation polling mechanism
+
+#### Un-Revoking a Token
+
+If a token was revoked by mistake:
+
+1. Find the revoked token in the list
+2. Click **"Un-revoke"** (or **"Restore"**)
+3. The token returns to its previous state (unused or redeemed)
+
+:::note Revocation sync delay
+There is a maximum **30-second delay** between revoking a token in the admin console and the HLS server blocking that token. This is by design — the HLS server polls for revocation updates every 30 seconds to avoid constant database queries.
+:::
+
+### Exporting Tokens
+
+Export your token list as a **CSV file** for distribution:
+
+1. Navigate to the event's token list
+2. Click **"Export CSV"**
+3. The download includes: code, label, status, created date, expiry date
+
+:::tip Distribution workflow
+A typical workflow: generate a batch of tokens with labels → export as CSV → use the CSV to send personalized emails with each viewer's unique code.
+:::
+
+---
+
+## Monitoring Active Sessions
+
+The admin console shows real-time session information:
+
+- **Active Sessions count** per event
+- **Per-token session details**: client IP, user agent, last heartbeat time
+- **Session duration**: how long the viewer has been watching
+
+### Force-Releasing a Session
+
+If a token shows as "in use" but the viewer is no longer watching (e.g., browser crashed):
+
+1. Find the active session in the token details
+2. Click **"Release Session"**
+3. The session is immediately freed, and the token can be used again
+
+:::info Automatic cleanup
+Abandoned sessions are automatically cleaned up after the configured timeout (default: 60 seconds of missed heartbeats). Manual release is rarely needed.
+:::
+
+---
+
+## Best Practices
+
+### Before the Event
+- Create the event well in advance
+- Generate tokens in batches with descriptive labels
+- Export and distribute tokens to your audience
+- Test with one token to verify the stream works end-to-end
+
+### During the Event
+- Monitor active sessions to gauge viewership
+- Keep the admin console open to handle support requests
+- Have spare tokens available for last-minute attendees
+
+### After the Event
+- Review session statistics
+- Revoke any unused tokens if not needed for VOD rewatch
+- Archive the event when the access window closes

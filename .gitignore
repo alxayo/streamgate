@@ -46,6 +46,11 @@ yarn-error.log*
 pnpm-debug.log*
 *.log
 
+# Docusaurus
+docs/.docusaurus/
+docs/build/
+docs/node_modules/
+
 # Streams / media files
 streams/
 test-streams/
