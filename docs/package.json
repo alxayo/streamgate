@@ -2,6 +2,9 @@
   "name": "docs",
   "version": "0.0.0",
   "private": true,
+  "overrides": {
+    "serialize-javascript": "7.0.3"
+  },
   "scripts": {
     "docusaurus": "docusaurus",
     "start": "docusaurus start",
@@ -22,7 +25,8 @@
     "clsx": "^2.0.0",
     "prism-react-renderer": "^2.3.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "video-streaming-platform": "file:.."
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "3.10.0",
