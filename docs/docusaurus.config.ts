@@ -11,11 +11,11 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://your-username.github.io',
-  baseUrl: '/VideoPlayer/',
+  url: 'https://alxayo.github.io',
+  baseUrl: '/streamgate/',
 
-  organizationName: 'your-username',
-  projectName: 'VideoPlayer',
+  organizationName: 'alxayo',
+  projectName: 'streamgate',
   trailingSlash: false,
 
   onBrokenLinks: 'throw',
@@ -32,7 +32,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/your-username/VideoPlayer/tree/main/docs/',
+           editUrl: 'https://github.com/alxayo/streamgate/tree/main/docs/',
         },
         blog: false,
         theme: {
@@ -63,7 +63,7 @@ const config: Config = {
           label: 'Developer Guide',
         },
         {
-          href: 'https://github.com/your-username/VideoPlayer',
+           href: 'https://github.com/alxayo/streamgate',
           label: 'GitHub',
           position: 'right',
         },
@@ -93,7 +93,7 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/your-username/VideoPlayer',
+               href: 'https://github.com/alxayo/streamgate',
             },
           ],
         },
