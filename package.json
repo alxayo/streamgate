@@ -2,6 +2,11 @@
   "name": "video-streaming-platform",
   "private": true,
   "workspaces": ["shared", "platform", "hls-server"],
+  "overrides": {
+    "express": {
+      "path-to-regexp": "0.1.13"
+    }
+  },
   "engines": {
     "node": ">=20.0.0"
   },
