@@ -261,7 +261,7 @@ npm run create-event
 ### 7. References
 
 - [FFmpeg Streaming Guide](../streaming-with-ffmpeg.md)
-- [HLS Server Reference](../developer-guide/hls-server.md)
+- [HLS Server Reference](../../developer-guide/hls-server.md)
 - [rtmp-go Documentation](https://github.com/alxayo/rtmp-go)
 - [Platform Admin Console](../admin-console.md)
 
