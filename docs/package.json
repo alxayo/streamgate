@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "overrides": {
-    "serialize-javascript": "7.0.3"
+    "serialize-javascript": "7.0.5"
   },
   "scripts": {
     "docusaurus": "docusaurus",
