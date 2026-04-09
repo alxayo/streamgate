@@ -186,8 +186,88 @@ The default `docker-compose.yml` includes placeholder secrets. Always override t
 4. **Use HTTPS** — Place a reverse proxy (nginx, Caddy, or cloud load balancer) in front of both services
 5. **Separate containers** — Consider running the Platform App and HLS server on separate hosts for scalability
 
+---
+
+## Integrating rtmp-go for RTMP Ingest (Step-by-Step)
+
+This section explains how to use [rtmp-go](https://github.com/alxayo/rtmp-go) as your RTMP ingest endpoint, trigger FFmpeg to produce HLS segments, and connect the output to the platform's HLS server. Both local and Docker workflows are covered.
+
+### 1. RTMP Ingest with rtmp-go
+
+- **Start rtmp-go** (see [rtmp-go docs](https://github.com/alxayo/rtmp-go) for install/run instructions):
+  ```bash
+  rtmp-go -listen :1935
+  ```
+- Your streaming software (e.g., OBS) should push to `rtmp://localhost:1935/live/stream`.
+
+### 2. FFmpeg: RTMP to HLS
+
+- Start FFmpeg to listen for RTMP and output HLS segments:
+  ```bash
+  ffmpeg -i rtmp://localhost:1935/live/stream \
+    -c:v libx264 -preset ultrafast -tune zerolatency \
+    -c:a aac -b:a 128k \
+    -f hls -hls_time 2 -hls_list_size 10 \
+    -hls_flags delete_segments+append_list \
+    -hls_segment_filename "streams/YOUR_EVENT_ID/segment-%03d.ts" \
+    "streams/YOUR_EVENT_ID/stream.m3u8"
+  ```
+- Replace `YOUR_EVENT_ID` with the event UUID from the platform admin console.
+- For Docker, use the `./streams/` directory at the project root (see above for path differences).
+
+### 3. Platform Event & Token Creation
+
+- In the Platform Admin Console (`http://localhost:3000/admin`):
+  1. Create a new event. Note the generated event ID (UUID).
+  2. Generate a playback token for your event (see [platform docs](../admin-console.md)).
+
+### 4. Watch the Stream
+
+- Open **http://localhost:3000** in your browser (Viewer Portal)
+- Enter the **token code** generated in Step 3 (12-character alphanumeric string)
+- The player will automatically connect to the HLS server with JWT authentication
+
+Alternatively, use the automation scripts to skip manual admin console steps:
+```bash
+# All-in-one: creates event, tokens, and launches FFmpeg
+npm run rtmp-ingest
+
+# Or create the event first, then run FFmpeg separately
+npm run create-event
+```
+
+### 5. Directory Structure Reference
+
+- Local: `hls-server/streams/YOUR_EVENT_ID/`
+- Docker: `./streams/YOUR_EVENT_ID/` (project root)
+
+### 6. Troubleshooting & Common Pitfalls
+
+- **No .ts files generated:**
+  - Check that the stream directory exists and matches the event ID.
+  - Ensure FFmpeg is running and receiving RTMP input (see FFmpeg logs).
+- **Player shows nothing:**
+  - Confirm the manifest is named `stream.m3u8` and segments are appearing.
+  - Check the playback URL includes a valid JWT token.
+- **Port conflicts:**
+  - If port 1935 is in use, stop other RTMP servers or change the port in both rtmp-go and FFmpeg.
+- **Docker path issues:**
+  - Always use `./streams/` at the project root for Docker. Do not use `hls-server/streams/`.
+- **Token errors:**
+  - Ensure the JWT token is for the correct event and not expired/revoked.
+- **Firewall/network:**
+  - If ingesting from a remote machine, open port 1935 and use the correct IP address.
+
+### 7. References
+
+- [FFmpeg Streaming Guide](../streaming-with-ffmpeg.md)
+- [HLS Server Reference](../developer-guide/hls-server.md)
+- [rtmp-go Documentation](https://github.com/alxayo/rtmp-go)
+- [Platform Admin Console](../admin-console.md)
+
 ## Next Steps
 
 - [Admin Console](../admin-console.md) — Create events and generate tokens
 - [Live Streaming with FFmpeg](../streaming-with-ffmpeg.md) — Start sending video content
+- [RTMP Ingest with rtmp-go](#integrating-rtmp-go-for-rtmp-ingest-step-by-step) — Set up live RTMP ingest with FFmpeg
 - [Configuration Reference](../configuration.md) — All environment variables explained

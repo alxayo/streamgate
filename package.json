@@ -32,6 +32,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "hash-password": "npx tsx scripts/hash-password.ts",
-    "add-vod": "npx tsx scripts/add-vod.ts"
+    "add-vod": "npx tsx scripts/add-vod.ts",
+    "create-event": "npx tsx scripts/create-event.ts",
+    "rtmp-ingest": "npx tsx scripts/rtmp-ingest.ts"
   }
 }

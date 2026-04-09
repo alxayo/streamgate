@@ -74,9 +74,38 @@ This generates a 720p stream with:
 
 ## RTMP Ingest
 
-### Receiving RTMP from OBS, Wirecast, or Other Software
+### Recommended: rtmp-go Integration & Automation Scripts
 
-Start FFmpeg as an RTMP listener, then point your streaming software at it:
+For robust, production-ready ingest, use [rtmp-go](https://github.com/alxayo/rtmp-go) as your RTMP endpoint. This is the recommended approach for both Docker and local workflows. See [Docker Setup: Integrating rtmp-go](./installation/docker-setup.md#integrating-rtmp-go-for-rtmp-ingest-step-by-step) for a full walkthrough.
+
+- **Start rtmp-go** (see [rtmp-go docs](https://github.com/alxayo/rtmp-go) for install/run instructions):
+  ```bash
+  rtmp-go -listen :1935
+  ```
+- Point your streaming software (e.g., OBS) to `rtmp://localhost:1935/live/stream`.
+- Use the provided automation scripts to set up events and start streaming:
+  - **`npm run rtmp-ingest`** — All-in-one: creates an event, generates tokens, sets up the stream directory, and launches FFmpeg to ingest from rtmp-go. Supports `--docker` flag for Docker environments.
+  - **`npm run create-event`** — Creates an ad hoc event with tokens and stream directory. Prompts for metadata if not provided via CLI args. Use this when you want to set up the event first and run FFmpeg separately.
+  - **`npm run add-vod`** — Creates a VOD event with a token and stream folder for pre-recorded HLS content.
+- For Docker, always use the `./streams/` directory at the project root (see [Docker Setup](./installation/docker-setup.md#stream-directory)).
+
+#### FFmpeg Example (RTMP to HLS)
+
+```bash
+ffmpeg -i rtmp://localhost:1935/live/stream \
+  -c:v libx264 -preset ultrafast -tune zerolatency \
+  -c:a aac -b:a 128k \
+  -f hls -hls_time 2 -hls_list_size 10 \
+  -hls_flags delete_segments+append_list \
+  -hls_segment_filename "streams/YOUR_EVENT_ID/segment-%03d.ts" \
+  "streams/YOUR_EVENT_ID/stream.m3u8"
+```
+
+See [Docker Setup](./installation/docker-setup.md#integrating-rtmp-go-for-rtmp-ingest-step-by-step) for a complete, automated ingest workflow.
+
+### Receiving RTMP from OBS, Wirecast, or Other Software (Manual)
+
+You can also run FFmpeg as an RTMP listener directly (not recommended for production):
 
 ```bash
 ffmpeg -listen 1 -i rtmp://0.0.0.0:1935/live/stream \
@@ -280,13 +309,18 @@ In **hybrid mode** (both `STREAM_ROOT` and `UPSTREAM_ORIGIN` set), the HLS serve
 
 See [Configuration Reference](./configuration.md) for details on content source modes.
 
-## Troubleshooting FFmpeg
+## Troubleshooting FFmpeg & Automated Ingest
 
 | Problem | Cause | Solution |
 |---------|-------|----------|
-| "No such file or directory" | Stream directory doesn't exist | Create it: `mkdir -p hls-server/streams/EVENT_ID` |
-| No `.ts` files appearing | FFmpeg not writing to correct path | Double-check the event ID in the path |
+| "No such file or directory" | Stream directory doesn't exist | Create it: `mkdir -p hls-server/streams/EVENT_ID` or `mkdir -p streams/EVENT_ID` for Docker |
+| No `.ts` files appearing | FFmpeg not writing to correct path | Double-check the event ID and path (see [Docker Setup](./installation/docker-setup.md#stream-directory)) |
 | `speed` below 1x | CPU can't keep up | Use `-preset ultrafast` or lower resolution |
 | "Address already in use" (RTMP) | Port 1935 is taken | Kill the other process or use a different port |
 | "Connection refused" (RTMP pull) | Source server not running | Verify the RTMP URL and server status |
 | Segments appear but player shows nothing | Manifest path mismatch | Ensure the main playlist is named `stream.m3u8` |
+| Automated ingest script fails | Database or path issue | See [Docker Setup: Troubleshooting & Common Pitfalls](./installation/docker-setup.md#troubleshooting--common-pitfalls) and [General Troubleshooting](./troubleshooting.md) |
+| rtmp-go not receiving streams | Port/firewall or config | Ensure port 1935 is open and matches FFmpeg/OBS settings |
+| Token errors on playback | JWT/token mismatch | Verify token is for the correct event and not expired/revoked |
+
+For more, see [General Troubleshooting](./troubleshooting.md) and [Docker Setup: Troubleshooting](./installation/docker-setup.md#troubleshooting--common-pitfalls).
