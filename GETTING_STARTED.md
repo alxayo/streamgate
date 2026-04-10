@@ -260,8 +260,15 @@ Migrations create the database schema (tables for Events, Tokens, ActiveSessions
 
 ```bash
 cd platform
-npx prisma migrate dev
+set -a
+source ../.env
+set +a
+npx prisma migrate dev --name init
+npx prisma generate
 ```
+
+Prisma v7 reads the datasource from `platform/prisma.config.ts`, so `DATABASE_URL` must be available in the shell before running the migrate command.
+The `npx prisma generate` step creates `platform/src/generated/prisma/*`, which the app imports at runtime.
 
 First run will:
 1. Create `dev.db` in the `platform/` directory
@@ -389,9 +396,14 @@ You need **two terminal windows** (or tabs) — one for each service. They run i
 ### Terminal 1: Start the Platform App (Next.js)
 
 ```bash
-cd c:\code\VideoPlayer\platform
-npm run dev
+cd platform
+set -a
+source ../.env
+set +a
+PORT=3000 npm run dev
 ```
+
+Use `PORT=3000` here because the shared root `.env` includes `PORT=4000` for the HLS server.
 
 Expected output:
 ```
@@ -409,7 +421,10 @@ The Platform App is now running at **`http://localhost:3000`**
 ### Terminal 2: Start the HLS Media Server (Express)
 
 ```bash
-cd c:\code\VideoPlayer\hls-server
+cd hls-server
+set -a
+source ../.env
+set +a
 npm run dev
 ```
 

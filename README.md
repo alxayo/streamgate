@@ -42,12 +42,16 @@ cp .env.example .env
 
 # 4. Initialize database
 cd platform
-npx prisma migrate dev
+set -a
+source ../.env
+set +a
+npx prisma migrate dev --name init
+npx prisma generate
 npx prisma db seed        # Optional: sample data
 
 # 5. Start services (in separate terminals)
-cd platform && npm run dev      # Terminal 1: Port 3000
-cd hls-server && npm run dev    # Terminal 2: Port 4000
+cd platform && set -a && source ../.env && set +a && PORT=3000 npm run dev      # Terminal 1: Port 3000
+cd hls-server && set -a && source ../.env && set +a && npm run dev    # Terminal 2: Port 4000
 ```
 
 **Access the application:**
