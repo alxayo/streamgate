@@ -6,9 +6,13 @@ const globalForPrisma = globalThis as unknown as { prisma: InstanceType<typeof P
 
 function createPrismaClient() {
   const rawUrl = process.env.DATABASE_URL || 'file:./dev.db';
-  const relativePath = rawUrl.replace('file:', '');
-  const dbPath = path.resolve(process.cwd(), 'prisma', relativePath);
-  const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
+  const rawPath = rawUrl.replace(/^file:/, '');
+  const isRelativePath = !path.isAbsolute(rawPath);
+  const platformDir = process.cwd().endsWith('/platform')
+    ? process.cwd()
+    : path.resolve(process.cwd(), 'platform');
+  const resolvedPath = isRelativePath ? path.resolve(platformDir, rawPath) : rawPath;
+  const adapter = new PrismaBetterSqlite3({ url: `file:${resolvedPath}` });
   return new PrismaClient({ adapter });
 }
 
