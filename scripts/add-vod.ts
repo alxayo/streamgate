@@ -27,7 +27,7 @@ function parseArg(name: string): string | undefined {
 
 async function main() {
   const workspaceRoot = path.resolve(__dirname, '..');
-  const dbPath = path.resolve(workspaceRoot, 'platform', 'prisma', 'dev.db');
+  const dbPath = path.resolve(workspaceRoot, 'platform', 'dev.db');
   const streamsRoot = path.resolve(workspaceRoot, 'streams');
 
   const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });

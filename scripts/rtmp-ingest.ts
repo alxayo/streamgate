@@ -39,7 +39,7 @@ async function prompt(question: string): Promise<string> {
 
 async function main() {
   const workspaceRoot = path.resolve(__dirname, '..');
-  const dbPath = path.resolve(workspaceRoot, 'platform', 'prisma', 'dev.db');
+  const dbPath = path.resolve(workspaceRoot, 'platform', 'dev.db');
 
   const streamsRoot = hasFlag('docker')
     ? path.resolve(workspaceRoot, 'streams')
