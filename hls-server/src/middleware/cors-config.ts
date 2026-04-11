@@ -11,3 +11,4 @@ export function createCorsMiddleware(config: ServerConfig) {
     maxAge: CORS_MAX_AGE_SECONDS,
   });
 }
+ 

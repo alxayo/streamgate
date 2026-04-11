@@ -5,13 +5,17 @@ import type { SessionData } from '@/lib/admin-session';
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Only protect /api/admin/* routes (except login and session check)
+  // Skip login page and public API endpoints
   if (
-    pathname.startsWith('/api/admin') &&
-    !pathname.startsWith('/api/admin/login') &&
-    !pathname.startsWith('/api/admin/session')
+    pathname === '/admin/login' ||
+    pathname.startsWith('/api/admin/login') ||
+    pathname.startsWith('/api/admin/session')
   ) {
-    // Read session from cookies
+    return NextResponse.next();
+  }
+
+  // Protect admin pages and API routes
+  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     const response = NextResponse.next();
     const session = await getIronSession<SessionData>(request, response, {
       password: process.env.PLAYBACK_SIGNING_SECRET!,
@@ -19,7 +23,12 @@ export async function middleware(request: NextRequest) {
     });
 
     if (!session.isAdmin) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      // API routes: return 401
+      if (pathname.startsWith('/api/admin')) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      // Page routes: redirect to login
+      return NextResponse.redirect(new URL('/admin/login', request.url));
     }
   }
 
@@ -27,5 +36,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/api/admin/:path*'],
+  matcher: ['/admin/:path*', '/api/admin/:path*'],
 };
