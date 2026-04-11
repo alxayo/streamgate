@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Plus, MoreHorizontal, Archive, Power, Trash2, Edit } from 'lucide-react';
+import { Plus, MoreHorizontal, Archive, Power, Trash2, Edit, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EventStatusBadge } from './event-status-badge';
 import {
@@ -22,6 +22,7 @@ interface Event {
   accessWindowHours: number;
   isActive: boolean;
   isArchived: boolean;
+  activeViewers: number;
   _count: { tokens: number };
 }
 
@@ -110,6 +111,7 @@ export function EventList() {
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Window</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Tokens</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Viewers</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
@@ -141,6 +143,19 @@ export function EventList() {
                     <EventStatusBadge isActive={event.isActive} isArchived={event.isArchived} />
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">{event._count.tokens}</td>
+                  <td className="px-4 py-3">
+                    {event.activeViewers > 0 ? (
+                      <Link
+                        href={`/admin/events/${event.id}/viewers`}
+                        className="inline-flex items-center gap-1 text-sm text-green-600 hover:text-green-700 font-medium"
+                      >
+                        <Users className="h-3.5 w-3.5" />
+                        {event.activeViewers}
+                      </Link>
+                    ) : (
+                      <span className="text-sm text-gray-400">0</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right relative">
                     <button
                       onClick={() => setActionMenu(actionMenu === event.id ? null : event.id)}

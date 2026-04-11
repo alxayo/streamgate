@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isValidAccessWindow, isValidEventSchedule } from '@streaming/shared';
+import { env } from '@/lib/env';
 
 // GET /api/admin/events/:id — Get event details
 export async function GET(
@@ -8,6 +9,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const heartbeatCutoff = new Date(Date.now() - env.SESSION_TIMEOUT_SECONDS * 1000);
+
   const event = await prisma.event.findUnique({
     where: { id },
     include: {
@@ -17,6 +20,10 @@ export async function GET(
           isRevoked: true,
           redeemedAt: true,
           expiresAt: true,
+          activeSessions: {
+            where: { lastHeartbeat: { gte: heartbeatCutoff } },
+            select: { id: true },
+          },
         },
       },
     },
@@ -46,10 +53,15 @@ export async function GET(
     }
   }
 
+  const activeViewers = event.tokens.reduce(
+    (sum, token) => sum + token.activeSessions.length,
+    0,
+  );
+
   const { tokens: _, ...eventData } = event;
 
   return NextResponse.json({
-    data: { ...eventData, tokenBreakdown },
+    data: { ...eventData, tokenBreakdown, activeViewers },
   });
 }
 

@@ -2,14 +2,23 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { CalendarDays, Ticket, Plus, Sparkles, Clock } from 'lucide-react';
+import { CalendarDays, Ticket, Plus, Sparkles, Clock, Users, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+
+interface LiveNowEvent {
+  id: string;
+  title: string;
+  streamType: string;
+  viewers: number;
+}
 
 interface DashboardData {
   activeEvents: number;
   totalTokens: number;
+  totalActiveViewers: number;
   tokenBreakdown: { unused: number; redeemed: number; expired: number; revoked: number };
   upcomingEvents: Array<{ id: string; title: string; startsAt: string }>;
+  liveNowEvents: LiveNowEvent[];
 }
 
 export default function AdminDashboard() {
@@ -38,7 +47,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-accent-blue/10 flex items-center justify-center">
@@ -47,6 +56,18 @@ export default function AdminDashboard() {
             <div>
               <p className="text-2xl font-semibold text-gray-900">{data.activeEvents}</p>
               <p className="text-sm text-gray-500">Active Events</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+              <Eye className="h-5 w-5 text-green-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-semibold text-gray-900">{data.totalActiveViewers}</p>
+              <p className="text-sm text-gray-500">Active Viewers</p>
             </div>
           </div>
         </div>
@@ -74,6 +95,46 @@ export default function AdminDashboard() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Watching Now */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Watching Now</h2>
+        {data.liveNowEvents.length === 0 ? (
+          <p className="text-gray-400 text-sm">No active viewers right now</p>
+        ) : (
+          <div className="space-y-3">
+            {data.liveNowEvents.map((event) => (
+              <div
+                key={event.id}
+                className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                    event.streamType === 'VOD'
+                      ? 'bg-purple-100 text-purple-700'
+                      : 'bg-red-100 text-red-700'
+                  }`}>
+                    {event.streamType === 'VOD' ? 'VOD' : 'Live'}
+                  </span>
+                  <Link
+                    href={`/admin/events/${event.id}`}
+                    className="font-medium text-gray-900 hover:text-accent-blue"
+                  >
+                    {event.title}
+                  </Link>
+                </div>
+                <Link
+                  href={`/admin/events/${event.id}/viewers`}
+                  className="flex items-center gap-1.5 text-sm text-green-600 hover:text-green-700 font-medium"
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  {event.viewers} viewer{event.viewers !== 1 ? 's' : ''}
+                </Link>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Token Breakdown */}

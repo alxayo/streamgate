@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isValidAccessWindow, isValidEventSchedule } from '@streaming/shared';
+import { env } from '@/lib/env';
 
 // GET /api/admin/events — List all events with filters
 export async function GET(request: NextRequest) {
@@ -37,6 +38,8 @@ export async function GET(request: NextRequest) {
         ? { title: 'asc' } // Will sort on application level
         : { startsAt: 'desc' };
 
+  const heartbeatCutoff = new Date(Date.now() - env.SESSION_TIMEOUT_SECONDS * 1000);
+
   const [events, total] = await Promise.all([
     prisma.event.findMany({
       where,
@@ -45,13 +48,31 @@ export async function GET(request: NextRequest) {
       take: limit,
       include: {
         _count: { select: { tokens: true } },
+        tokens: {
+          select: {
+            activeSessions: {
+              where: { lastHeartbeat: { gte: heartbeatCutoff } },
+              select: { id: true },
+            },
+          },
+        },
       },
     }),
     prisma.event.count({ where }),
   ]);
 
+  // Map events with active viewer counts
+  const eventsWithViewers = events.map((event) => {
+    const activeViewers = event.tokens.reduce(
+      (sum, token) => sum + token.activeSessions.length,
+      0,
+    );
+    const { tokens: _, ...rest } = event;
+    return { ...rest, activeViewers };
+  });
+
   return NextResponse.json({
-    data: events,
+    data: eventsWithViewers,
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   });
 }

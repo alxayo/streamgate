@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play } from 'lucide-react';
+import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EventStatusBadge } from '@/components/admin/event-status-badge';
@@ -28,6 +28,7 @@ interface EventDetail {
   accessWindowHours: number;
   isActive: boolean;
   isArchived: boolean;
+  activeViewers: number;
   _count: { tokens: number };
   tokenBreakdown: { unused: number; redeemed: number; expired: number; revoked: number };
 }
@@ -157,7 +158,17 @@ export default function EventDetailPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-5 gap-4">
+        <Link
+          href={`/admin/events/${eventId}/viewers`}
+          className="bg-white rounded-lg border border-gray-200 p-4 hover:border-green-300 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-green-600" />
+            <p className="text-2xl font-semibold text-gray-900">{event.activeViewers}</p>
+          </div>
+          <p className="text-xs text-green-600 font-medium">Active Viewers</p>
+        </Link>
         {Object.entries(event.tokenBreakdown).map(([status, count]) => (
           <div key={status} className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-2xl font-semibold text-gray-900">{count}</p>
