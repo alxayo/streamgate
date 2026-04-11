@@ -6,7 +6,7 @@ function getLanOrigins() {
   for (const nets of Object.values(networkInterfaces())) {
     for (const net of nets ?? []) {
       if (net.family === 'IPv4' && !net.internal) {
-        origins.push(`http://${net.address}:3000`);
+        origins.push(net.address);
       }
     }
   }
