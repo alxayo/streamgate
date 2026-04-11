@@ -26,7 +26,10 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetch('/api/admin/dashboard')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`Dashboard fetch failed: ${res.status}`);
+        return res.json();
+      })
       .then((d) => setData(d.data))
       .catch(console.error);
   }, []);
