@@ -52,8 +52,8 @@ app.use(createErrorHandler());
 syncService.start();
 cacheCleanup.start();
 
-const server = app.listen(config.port, () => {
-  console.log(`HLS Media Server listening on port ${config.port}`);
+const server = app.listen(config.port, '0.0.0.0', () => {
+  console.log(`HLS Media Server listening on 0.0.0.0:${config.port}`);
   console.log(`Content mode: ${contentResolver.mode}`);
 });
 

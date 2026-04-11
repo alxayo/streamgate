@@ -63,6 +63,27 @@ if ($nodeMajor -lt 20) {
 }
 Write-OK "Node.js $nodeVer"
 
+# ── Detect LAN IPv4 address ────────────────────────────────────────────────────
+$LanIp = ""
+try {
+    # Get the first non-loopback IPv4 address
+    $LanIp = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias * -ErrorAction Stop |
+        Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' } |
+        Select-Object -First 1).IPAddress
+} catch {
+    # Fallback for older PowerShell / non-Windows
+    try {
+        $LanIp = ([System.Net.Dns]::GetHostAddresses([System.Net.Dns]::GetHostName()) |
+            Where-Object { $_.AddressFamily -eq 'InterNetwork' -and $_.ToString() -ne '127.0.0.1' } |
+            Select-Object -First 1).ToString()
+    } catch {}
+}
+if ($LanIp) {
+    Write-OK "LAN IP detected: $LanIp"
+} else {
+    Write-Warn "Could not detect LAN IPv4 address - only localhost URLs will be shown"
+}
+
 # ── 2. Install dependencies ───────────────────────────────────────────────────
 if (-not (Test-Path "$ProjectRoot\node_modules")) {
     Write-Step "Installing npm dependencies (this may take a minute)..."
@@ -88,6 +109,9 @@ if (-not (Test-Path $EnvFile)) {
     # Use forward slashes so Node.js resolves the path on all platforms.
     $streamsPath = "$ProjectRoot\streams".Replace('\', '/')
 
+$corsOrigin = "http://localhost:3000"
+if ($LanIp) { $corsOrigin = "http://localhost:3000,http://${LanIp}:3000" }
+
     @"
 # === Shared ===
 PLAYBACK_SIGNING_SECRET=$signingSecret
@@ -108,7 +132,7 @@ SEGMENT_CACHE_ROOT=
 SEGMENT_CACHE_MAX_SIZE_GB=50
 SEGMENT_CACHE_MAX_AGE_HOURS=72
 REVOCATION_POLL_INTERVAL_MS=30000
-CORS_ALLOWED_ORIGIN=http://localhost:3000
+CORS_ALLOWED_ORIGIN=$corsOrigin
 PORT=4000
 "@ | Set-Content $EnvFile -Encoding UTF8
 
@@ -213,10 +237,10 @@ $HlsLog      = "$env:TEMP\streamgate-hls.log"
 # Locate the npm wrapper so Start-Process can find it on Windows.
 $npmPath = (Get-Command npm -ErrorAction Stop).Source
 
-Write-Step "Starting Platform App on port 3000..."
+Write-Step "Starting Platform App on port 3000 (binding to 0.0.0.0)..."
 $env:PORT = "3000"
 $PlatformProc = Start-Process -FilePath $npmPath `
-    -ArgumentList @("run", "dev") `
+    -ArgumentList @("run", "dev", "--", "--hostname", "0.0.0.0") `
     -WorkingDirectory "$ProjectRoot\platform" `
     -NoNewWindow -PassThru `
     -RedirectStandardOutput  $PlatformLog `
@@ -260,6 +284,13 @@ Write-Host "  Viewer Portal    " -NoNewline; Write-Host "http://localhost:3000" 
 Write-Host "  Admin Console    " -NoNewline; Write-Host "http://localhost:3000/admin"  -ForegroundColor Cyan
 Write-Host "  HLS Server       " -NoNewline; Write-Host "http://localhost:4000"        -ForegroundColor Cyan
 Write-Host "  HLS Health       " -NoNewline; Write-Host "http://localhost:4000/health" -ForegroundColor Cyan
+if ($LanIp) {
+    Write-Host ""
+    Write-Host "  LAN Access"
+    Write-Host "    Viewer Portal  " -NoNewline; Write-Host "http://${LanIp}:3000"       -ForegroundColor Cyan
+    Write-Host "    Admin Console  " -NoNewline; Write-Host "http://${LanIp}:3000/admin" -ForegroundColor Cyan
+    Write-Host "    HLS Server     " -NoNewline; Write-Host "http://${LanIp}:4000"       -ForegroundColor Cyan
+}
 
 Write-Host ""
 Write-Host "  +------------------------------------------------------+" -ForegroundColor Yellow
@@ -282,6 +313,9 @@ Write-Host "    Password  $AdminPasswordDisplay"
 Write-Host ""
 Write-Host "  How to Watch"
 Write-Host "    1. Open   " -NoNewline; Write-Host "http://localhost:3000" -ForegroundColor Cyan -NoNewline; Write-Host "  in your browser"
+if ($LanIp) {
+    Write-Host "           or " -NoNewline; Write-Host "http://${LanIp}:3000" -ForegroundColor Cyan -NoNewline; Write-Host "  from another device on your network"
+}
 Write-Host "    2. Enter  " -NoNewline; Write-Host $tokenCode -ForegroundColor Cyan -NoNewline; Write-Host "  as the token code"
 Write-Host "    3. Click  'Start Watching'"
 

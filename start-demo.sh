@@ -58,6 +58,21 @@ if (( NODE_MAJOR < 20 )); then
 fi
 ok "Node.js v${NODE_VER}"
 
+# ── Detect LAN IPv4 address ────────────────────────────────────────────────
+LAN_IP=""
+if command -v ipconfig &>/dev/null && [[ "$(uname)" == "Darwin" ]]; then
+  # macOS
+  LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
+else
+  # Linux
+  LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+fi
+if [[ -n "$LAN_IP" ]]; then
+  ok "LAN IP detected: ${LAN_IP}"
+else
+  warn "Could not detect LAN IPv4 address — only localhost URLs will be shown"
+fi
+
 # ── 2. Install dependencies ───────────────────────────────────────────────────
 if [[ ! -d "$SCRIPT_DIR/node_modules" ]]; then
   info "Installing npm dependencies (this may take a minute)…"
@@ -100,7 +115,7 @@ SEGMENT_CACHE_ROOT=
 SEGMENT_CACHE_MAX_SIZE_GB=50
 SEGMENT_CACHE_MAX_AGE_HOURS=72
 REVOCATION_POLL_INTERVAL_MS=30000
-CORS_ALLOWED_ORIGIN=http://localhost:3000
+CORS_ALLOWED_ORIGIN=http://localhost:3000${LAN_IP:+,http://${LAN_IP}:3000}
 PORT=4000
 EOF
   ok ".env created  (admin password: admin123)"
@@ -204,8 +219,8 @@ fi
 PLATFORM_LOG="/tmp/streamgate-platform.log"
 HLS_LOG="/tmp/streamgate-hls.log"
 
-info "Starting Platform App on port 3000…"
-(cd "$SCRIPT_DIR/platform" && PORT=3000 npm run dev > "$PLATFORM_LOG" 2>&1) &
+info "Starting Platform App on port 3000 (binding to 0.0.0.0)…"
+(cd "$SCRIPT_DIR/platform" && PORT=3000 npx next dev --hostname 0.0.0.0 > "$PLATFORM_LOG" 2>&1) &
 PLATFORM_PID=$!
 
 info "Starting HLS Media Server on port 4000…"
@@ -236,6 +251,13 @@ printf "  ${BOLD}Viewer Portal${RESET}    http://localhost:3000\n"
 printf "  ${BOLD}Admin Console${RESET}    http://localhost:3000/admin\n"
 printf "  ${BOLD}HLS Server${RESET}       http://localhost:4000\n"
 printf "  ${BOLD}HLS Health${RESET}       http://localhost:4000/health\n"
+if [[ -n "$LAN_IP" ]]; then
+  printf "\n"
+  printf "  ${BOLD}LAN Access${RESET}\n"
+  printf "    Viewer Portal  http://%s:3000\n"        "$LAN_IP"
+  printf "    Admin Console  http://%s:3000/admin\n"  "$LAN_IP"
+  printf "    HLS Server     http://%s:4000\n"        "$LAN_IP"
+fi
 
 printf "\n"
 printf "  ${BOLD}${YELLOW}┌──────────────────────────────────────────────────────┐${RESET}\n"
@@ -254,6 +276,9 @@ printf "    Password  %s\n" "$ADMIN_PASSWORD_DISPLAY"
 printf "\n"
 printf "  ${BOLD}How to watch${RESET}\n"
 printf "    1. Open   ${CYAN}http://localhost:3000${RESET}  in your browser\n"
+if [[ -n "$LAN_IP" ]]; then
+  printf "           or ${CYAN}http://%s:3000${RESET}  from another device on your network\n" "$LAN_IP"
+fi
 printf "    2. Enter  ${BOLD}${CYAN}%s${RESET}  as the token code\n" "$TOKEN_CODE"
 printf "    3. Click  'Start Watching'\n"
 
