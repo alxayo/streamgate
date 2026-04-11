@@ -81,13 +81,13 @@ export function TokenEntry({ appName, onSuccess }: TokenEntryProps) {
                 setCode(e.target.value);
                 if (error) setError(null);
               }}
-              className={`font-mono text-lg tracking-wider text-center uppercase h-12 ${
+              className={`font-mono text-lg tracking-wider text-center h-12 ${
                 error ? 'border-live-red focus-visible:ring-live-red' : ''
               }`}
               autoFocus
               autoComplete="off"
               autoCorrect="off"
-              autoCapitalize="characters"
+              autoCapitalize="none"
               spellCheck={false}
               disabled={submitState !== 'idle'}
             />

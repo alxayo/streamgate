@@ -18,19 +18,32 @@ function loadAdminPasswordHash(): string {
     return fs.readFileSync(hashFile, 'utf-8').trim();
   }
 
-  // Read directly from .env file, bypassing dotenv expansion
-  try {
-    const envPath = path.resolve(process.cwd(), '.env');
-    const content = fs.readFileSync(envPath, 'utf-8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('ADMIN_PASSWORD_HASH=')) {
-        return trimmed.slice('ADMIN_PASSWORD_HASH='.length).trim().replace(/^["']|["']$/g, '');
-      }
-    }
-  } catch { /* ignore */ }
+  // Read directly from .env file(s), bypassing dotenv expansion.
+  const envPaths = [
+    path.resolve(process.cwd(), '..', '.env'),
+    path.resolve(process.cwd(), '.env'),
+  ];
 
-  throw new Error('ADMIN_PASSWORD_HASH not found in .env file');
+  for (const envPath of envPaths) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf-8');
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('ADMIN_PASSWORD_HASH=')) {
+          return trimmed.slice('ADMIN_PASSWORD_HASH='.length).trim().replace(/^["']|["']$/g, '');
+        }
+      }
+    } catch {
+      // try the next .env path
+    }
+  }
+
+  const directHash = process.env.ADMIN_PASSWORD_HASH;
+  if (directHash) {
+    return directHash.trim().replace(/^["']|["']$/g, '');
+  }
+
+  throw new Error('ADMIN_PASSWORD_HASH not found in environment variables or .env files');
 }
 
 let _adminHash: string | null = null;
