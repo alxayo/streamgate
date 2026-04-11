@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check } from 'lucide-react';
+import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EventStatusBadge } from '@/components/admin/event-status-badge';
@@ -146,6 +146,11 @@ export default function EventDetailPage() {
           <Link href={`/admin/events/${eventId}/edit`}>
             <Button variant="outline" size="sm" className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50">
               <Edit className="h-3.5 w-3.5 mr-1" /> Edit
+            </Button>
+          </Link>
+          <Link href={`/admin/events/${eventId}/preview`}>
+            <Button variant="outline" size="sm" className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50">
+              <Play className="h-3.5 w-3.5 mr-1" /> Preview
             </Button>
           </Link>
         </div>
