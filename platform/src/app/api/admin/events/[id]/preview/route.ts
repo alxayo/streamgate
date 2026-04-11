@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { mintPlaybackToken } from '@/lib/jwt';
-import { env } from '@/lib/env';
+import { env, getHlsBaseUrl } from '@/lib/env';
 
 // POST /api/admin/events/:id/preview — Mint a preview JWT for admin playback
 export async function POST(
@@ -24,7 +24,7 @@ export async function POST(
 
   return NextResponse.json({
     playbackToken: token,
-    playbackBaseUrl: env.HLS_SERVER_BASE_URL,
+    playbackBaseUrl: getHlsBaseUrl(_request.headers.get('host')),
     streamPath: `/streams/${event.id}/stream.m3u8`,
     tokenExpiresIn: expiresIn,
     event: {

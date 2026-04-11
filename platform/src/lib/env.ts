@@ -68,3 +68,24 @@ export const env = {
   APP_NAME: process.env.NEXT_PUBLIC_APP_NAME || 'StreamGate',
   SESSION_TIMEOUT_SECONDS: parseInt(process.env.SESSION_TIMEOUT_SECONDS || '60', 10),
 } as const;
+
+/**
+ * Derive the public HLS server base URL from the incoming request.
+ * Replaces the port in the request's Host with the HLS server port so
+ * LAN/remote clients get a reachable URL instead of hardcoded localhost.
+ */
+export function getHlsBaseUrl(requestHost: string | null): string {
+  const configured = env.HLS_SERVER_BASE_URL;
+  if (!requestHost) return configured;
+
+  try {
+    const hlsUrl = new URL(configured);
+    // Extract hostname from request Host header (strip port if present)
+    const reqHostname = requestHost.replace(/:\d+$/, '');
+    hlsUrl.hostname = reqHostname;
+    // Remove trailing slash
+    return hlsUrl.origin;
+  } catch {
+    return configured;
+  }
+}

@@ -5,7 +5,7 @@ import { RateLimiter } from '@/lib/rate-limiter';
 import { getActiveSession, createSession } from '@/lib/session-service';
 import { getEventStatus } from '@/lib/stream-probe';
 import { sanitizeTokenCode, RATE_LIMIT_TOKEN_VALIDATION } from '@streaming/shared';
-import { env } from '@/lib/env';
+import { env, getHlsBaseUrl } from '@/lib/env';
 
 const validateLimiter = new RateLimiter(RATE_LIMIT_TOKEN_VALIDATION);
 
@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
       isLive: status === 'live',
     },
     playbackToken,
-    playbackBaseUrl: env.HLS_SERVER_BASE_URL,
+    playbackBaseUrl: getHlsBaseUrl(request.headers.get('host')),
     streamPath: `/streams/${token.eventId}/stream.m3u8`,
     expiresAt: token.expiresAt.toISOString(),
     tokenExpiresIn: expiresIn,
