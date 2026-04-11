@@ -6,12 +6,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface EventFormProps {
   initialData?: {
     id: string;
     title: string;
     description: string | null;
+    streamType: string;
     streamUrl: string | null;
     posterUrl: string | null;
     startsAt: string;
@@ -27,6 +35,7 @@ export function EventForm({ initialData }: EventFormProps) {
   const [formData, setFormData] = useState({
     title: initialData?.title || '',
     description: initialData?.description || '',
+    streamType: initialData?.streamType || 'LIVE',
     streamUrl: initialData?.streamUrl || '',
     posterUrl: initialData?.posterUrl || '',
     startsAt: initialData?.startsAt ? new Date(initialData.startsAt).toISOString().slice(0, 16) : '',
@@ -53,6 +62,7 @@ export function EventForm({ initialData }: EventFormProps) {
           startsAt: new Date(formData.startsAt).toISOString(),
           endsAt: new Date(formData.endsAt).toISOString(),
           description: formData.description || null,
+          streamType: formData.streamType,
           streamUrl: formData.streamUrl || null,
           posterUrl: formData.posterUrl || null,
         }),
@@ -82,6 +92,19 @@ export function EventForm({ initialData }: EventFormProps) {
           className="bg-white border-gray-300 text-gray-900"
           required
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-gray-700">Stream Type *</Label>
+        <Select value={formData.streamType} onValueChange={(v) => setFormData({ ...formData, streamType: v })}>
+          <SelectTrigger className="w-[180px] bg-white border-gray-300 text-gray-900">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-white border-gray-200 text-gray-900">
+            <SelectItem value="LIVE">Live</SelectItem>
+            <SelectItem value="VOD">VOD</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="space-y-2">

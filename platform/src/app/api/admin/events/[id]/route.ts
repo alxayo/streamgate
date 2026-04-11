@@ -60,7 +60,7 @@ export async function PUT(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const { title, description, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours } = body;
+  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours } = body;
 
   const existing = await prisma.event.findUnique({ where: { id } });
   if (!existing) {
@@ -95,11 +95,14 @@ export async function PUT(
     }
   }
 
+  const validStreamType = streamType === 'VOD' || streamType === 'LIVE' ? streamType : undefined;
+
   const event = await prisma.event.update({
     where: { id },
     data: {
       ...(title !== undefined && { title: title.trim() }),
       ...(description !== undefined && { description: description || null }),
+      ...(validStreamType !== undefined && { streamType: validStreamType }),
       ...(streamUrl !== undefined && { streamUrl: streamUrl || null }),
       ...(posterUrl !== undefined && { posterUrl: posterUrl || null }),
       startsAt: startDate,

@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/events — Create a new event
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { title, description, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours } = body;
+  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours } = body;
 
   // Validation
   if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -93,10 +93,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const validStreamType = streamType === 'VOD' ? 'VOD' : 'LIVE';
+
   const event = await prisma.event.create({
     data: {
       title: title.trim(),
       description: description || null,
+      streamType: validStreamType,
       streamUrl: streamUrl || null,
       posterUrl: posterUrl || null,
       startsAt: startDate,

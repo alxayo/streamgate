@@ -11,6 +11,7 @@ model Event {
   id                String   @id @default(uuid())
   title             String
   description       String?
+  streamType        String   @default("LIVE") // "LIVE" or "VOD"
   streamUrl         String?
   posterUrl         String?
   startsAt          DateTime

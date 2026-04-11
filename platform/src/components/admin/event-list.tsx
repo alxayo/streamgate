@@ -16,6 +16,7 @@ import {
 interface Event {
   id: string;
   title: string;
+  streamType: string;
   startsAt: string;
   endsAt: string;
   accessWindowHours: number;
@@ -103,6 +104,7 @@ export function EventList() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Title</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Starts</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Ends</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Window</th>
@@ -118,6 +120,15 @@ export function EventList() {
                     <Link href={`/admin/events/${event.id}`} className="text-sm font-medium text-accent-blue hover:underline">
                       {event.title}
                     </Link>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      event.streamType === 'VOD'
+                        ? 'bg-purple-100 text-purple-700'
+                        : 'bg-red-100 text-red-700'
+                    }`}>
+                      {event.streamType === 'VOD' ? 'VOD' : 'Live'}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
                     {new Date(event.startsAt).toLocaleDateString()}

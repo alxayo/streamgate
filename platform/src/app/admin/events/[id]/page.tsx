@@ -21,6 +21,7 @@ interface EventDetail {
   id: string;
   title: string;
   description: string | null;
+  streamType: string;
   streamUrl: string | null;
   startsAt: string;
   endsAt: string;
@@ -126,9 +127,19 @@ export default function EventDetailPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">{event.title}</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {new Date(event.startsAt).toLocaleString()} — {new Date(event.endsAt).toLocaleString()}
-          </p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-sm text-gray-500">
+              {new Date(event.startsAt).toLocaleString()} — {new Date(event.endsAt).toLocaleString()}
+            </p>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+              event.streamType === 'VOD'
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-red-100 text-red-700'
+            }`}>
+              {event.streamType === 'VOD' ? 'VOD' : 'Live'}
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mt-1 font-mono">{event.id}</p>
         </div>
         <div className="flex items-center gap-2">
           <EventStatusBadge isActive={event.isActive} isArchived={event.isArchived} />

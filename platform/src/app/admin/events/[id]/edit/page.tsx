@@ -11,6 +11,7 @@ export default function EditEventPage() {
     id: string;
     title: string;
     description: string | null;
+    streamType: string;
     streamUrl: string | null;
     posterUrl: string | null;
     startsAt: string;
