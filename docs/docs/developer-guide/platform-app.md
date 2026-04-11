@@ -217,6 +217,10 @@ POST /api/tokens/validate  { code: "Ab3kF9mNx2Qp" }
 9. Return: { event: PublicEventInfo, playbackToken, playbackBaseUrl, streamPath, expiresAt, tokenExpiresIn }
 ```
 
+:::info Dynamic playbackBaseUrl
+The `playbackBaseUrl` returned to the browser is dynamically derived from the incoming request's `Host` header using `getHlsBaseUrl()` in `lib/env.ts`. This replaces the hostname in `HLS_SERVER_BASE_URL` with the request's hostname while preserving the HLS server port. This ensures LAN and remote clients receive a reachable HLS server URL without manual configuration.
+:::
+
 ## JWT Refresh Flow
 
 The player refreshes its JWT every 50 minutes (before the 60-minute expiry):

@@ -47,6 +47,10 @@ curl -X POST http://localhost:3000/api/tokens/validate \
 }
 ```
 
+:::note
+`playbackBaseUrl` is dynamically derived from the request's hostname. If the request comes from `192.168.0.11:3000`, the response returns `http://192.168.0.11:4000` instead of `http://localhost:4000`.
+:::
+
 **Error Responses:**
 
 | Status | Condition | Body |

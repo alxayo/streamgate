@@ -128,7 +128,7 @@ export interface PublicEventInfo {
 export interface TokenValidationResponse {
   event: PublicEventInfo;
   playbackToken: string;     // JWT string
-  playbackBaseUrl: string;   // HLS server base URL
+  playbackBaseUrl: string;   // HLS server base URL (dynamically derived from request host)
   streamPath: string;        // e.g., "/streams/evt-uuid/"
   expiresAt: string;         // ISO 8601 token expiry
   tokenExpiresIn: number;    // Seconds until JWT expires

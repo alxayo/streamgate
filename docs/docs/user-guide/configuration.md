@@ -52,7 +52,7 @@ Set these in `platform/.env` or the root `.env` file.
 |----------|----------|---------|-------------|
 | `DATABASE_URL` | ✅ | `file:./dev.db` | Database connection string. SQLite for development (`file:./dev.db`), PostgreSQL for production (`postgresql://user:pass@host:5432/dbname`). |
 | `ADMIN_PASSWORD_HASH` | ✅ | — | bcrypt hash of the admin console password. Generate with `npm run hash-password`. |
-| `HLS_SERVER_BASE_URL` | ✅ | `http://localhost:4000` | Public URL of the HLS Media Server, as seen by the viewer's browser. Used to construct stream URLs in the player. |
+| `HLS_SERVER_BASE_URL` | ✅ | `http://localhost:4000` | Base URL of the HLS Media Server. In development, the actual URL sent to browsers is dynamically derived from the request's hostname (preserving the HLS server port), so LAN clients automatically get a reachable address. In production, set this to the public URL viewers will use. |
 | `NEXT_PUBLIC_APP_NAME` | ❌ | `StreamGate` | Application name displayed in the UI. The `NEXT_PUBLIC_` prefix makes it available in the browser. |
 | `SESSION_TIMEOUT_SECONDS` | ❌ | `60` | Seconds of missed heartbeats before a viewing session is considered abandoned and automatically released. Lower values free up tokens faster; higher values tolerate more network instability. |
 
@@ -98,7 +98,7 @@ Set these in `hls-server/.env` or the root `.env` file.
 | `SEGMENT_CACHE_MAX_SIZE_GB` | ❌ | `50` | Maximum cache size in GB. When exceeded, least-recently-used segments are evicted. |
 | `SEGMENT_CACHE_MAX_AGE_HOURS` | ❌ | `72` | Maximum age of cached segments in hours. Segments older than this are automatically cleaned up. |
 | `REVOCATION_POLL_INTERVAL_MS` | ❌ | `30000` | How often (in milliseconds) to poll the Platform App for revocation updates. Lower values = faster revocation at the cost of more API calls. |
-| `CORS_ALLOWED_ORIGIN` | ✅ | `http://localhost:3000` | Origin allowed to make cross-origin requests to the HLS server. Must match the Platform App's public URL. |
+| `CORS_ALLOWED_ORIGIN` | ✅ | `http://localhost:3000` | Origin(s) allowed to make cross-origin requests to the HLS server. Must match the Platform App's public URL. Supports **comma-separated** values for multiple origins (e.g., `http://localhost:3000,http://192.168.0.11:3000`). |
 | `PORT` | ❌ | `4000` | Port the HLS server listens on. |
 
 ---
@@ -176,6 +176,19 @@ STREAM_ROOT=./streams
 CORS_ALLOWED_ORIGIN=http://localhost:3000
 ```
 
+### LAN Development (access from other devices)
+
+```env
+# Same as minimal, but allow LAN access:
+CORS_ALLOWED_ORIGIN=http://localhost:3000,http://192.168.0.11:3000
+# HLS_SERVER_BASE_URL remains localhost — the Platform App dynamically
+# rewrites it based on the viewer's request origin.
+```
+
+:::tip LAN access in dev mode
+The `next.config.mjs` auto-detects LAN IPv4 addresses and adds them to `allowedDevOrigins`, so Next.js dev mode works from LAN IPs without additional configuration. You only need to update `CORS_ALLOWED_ORIGIN` to include your LAN origin so the HLS server accepts cross-origin requests.
+:::
+
 ### Production (PostgreSQL + Proxy Mode)
 
 ```env
@@ -209,7 +222,7 @@ The Docker Compose file includes pre-configured values for local development. Ov
 :::
 
 :::warning CORS in production
-`CORS_ALLOWED_ORIGIN` must exactly match the URL your viewers use to access the Platform App — including protocol, domain, and port. Mismatched CORS settings will cause the player to fail with network errors.
+`CORS_ALLOWED_ORIGIN` must exactly match the URL(s) your viewers use to access the Platform App — including protocol, domain, and port. Mismatched CORS settings will cause the player to fail with network errors. For LAN/multi-origin setups, use comma-separated values.
 :::
 
 :::info Public prefix

@@ -261,15 +261,62 @@ Access to XMLHttpRequest at 'http://localhost:4000/...' from origin 'http://loca
 **Fix:**
 
 1. Check the URL in your browser's address bar (the Platform App URL)
-2. Set `CORS_ALLOWED_ORIGIN` to match exactly:
+2. Set `CORS_ALLOWED_ORIGIN` to match exactly. For multiple origins, use comma-separated values:
    ```env
-   # Must include protocol and port
+   # Single origin
    CORS_ALLOWED_ORIGIN=http://localhost:3000
+
+   # Multiple origins (e.g., localhost + LAN IP)
+   CORS_ALLOWED_ORIGIN=http://localhost:3000,http://192.168.0.11:3000
    ```
 3. Restart the HLS server
 
 :::warning Exact match required
-`http://localhost:3000` and `http://127.0.0.1:3000` are **different origins**. Use whichever one matches your browser's address bar.
+`http://localhost:3000` and `http://127.0.0.1:3000` are **different origins**. Use whichever one matches your browser's address bar. When accessing from a LAN IP, add that origin to `CORS_ALLOWED_ORIGIN` as a comma-separated entry.
+:::
+
+---
+
+## LAN / Network Access Issues
+
+### Buttons Disabled / Page Not Interactive on LAN IP
+
+**Symptom:** Accessing StreamGate via a LAN IP (e.g., `http://192.168.0.11:3000`) renders the page but buttons are disabled and inputs don't respond. Everything works fine on `localhost:3000`.
+
+**Cause:** Next.js dev mode blocks cross-origin dev resource requests (HMR/React Server Components) from non-localhost origins by default. Without these resources, React cannot hydrate — event handlers never attach, leaving buttons visually rendered but non-functional.
+
+**Fix:** StreamGate's `next.config.mjs` auto-detects LAN IPs and adds them to `allowedDevOrigins`. If this isn't working:
+
+1. Verify `next.config.mjs` includes the `allowedDevOrigins` configuration
+2. Restart the dev server after changing network configuration
+3. Ensure the dev server binds to `0.0.0.0` (not just localhost):
+   ```bash
+   npx next dev --hostname 0.0.0.0
+   ```
+
+:::info Production not affected
+This issue only affects Next.js dev mode. Production builds (`next start`) do not have this restriction.
+:::
+
+### Video Won't Play from LAN IP
+
+**Symptom:** Token validation works from a LAN IP, but the video player shows a loading spinner or fails silently. Works fine on localhost.
+
+**Causes:**
+1. **CORS blocking** — The HLS server's `CORS_ALLOWED_ORIGIN` only includes `http://localhost:3000`, blocking requests from `http://192.168.0.11:3000`
+2. **HLS server unreachable** — The HLS server may only be listening on `localhost` instead of `0.0.0.0`
+
+**Fix:**
+
+1. Add your LAN origin to `CORS_ALLOWED_ORIGIN`:
+   ```env
+   CORS_ALLOWED_ORIGIN=http://localhost:3000,http://192.168.0.11:3000
+   ```
+2. Ensure the HLS server binds to all interfaces (check `hls-server/src/index.ts` — it should use `0.0.0.0`)
+3. Restart both services
+
+:::tip Dynamic HLS URL
+The Platform App automatically derives the HLS server URL from the viewer's request hostname. If you access via `192.168.0.11:3000`, the player will request streams from `192.168.0.11:4000`. You don't need to change `HLS_SERVER_BASE_URL` for LAN access.
 :::
 
 ---

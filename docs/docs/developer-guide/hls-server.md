@@ -279,16 +279,27 @@ The revocation cache grows over time as tokens are revoked. The `evictOlderThan(
 
 ## CORS Configuration
 
-CORS is restricted to the Platform App origin only:
+CORS is configured to allow requests from the Platform App origin(s):
 
 ```typescript
 // cors-config.ts
+const origins = config.corsAllowedOrigin.split(',').map((o) => o.trim());
 cors({
-  origin: config.corsAllowedOrigin,  // e.g., "https://stream.example.com"
+  origin: origins.length === 1 ? origins[0] : origins,
   methods: ['GET', 'HEAD', 'OPTIONS'],
   allowedHeaders: ['Authorization', 'Range'],
   maxAge: 86400,  // 24-hour preflight cache
 })
+```
+
+`CORS_ALLOWED_ORIGIN` supports **comma-separated values** for multiple origins:
+
+```env
+# Single origin (localhost only)
+CORS_ALLOWED_ORIGIN=http://localhost:3000
+
+# Multiple origins (localhost + LAN IP)
+CORS_ALLOWED_ORIGIN=http://localhost:3000,http://192.168.0.11:3000
 ```
 
 :::note
