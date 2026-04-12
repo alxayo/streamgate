@@ -215,6 +215,10 @@ Key differences from live streaming:
 - `-preset medium -crf 23` — Better quality/size ratio (not optimized for speed like live)
 - No `-re` flag — Transcode as fast as possible
 
+:::tip Want to optimize for latency?
+The options below affect live streaming latency. For a detailed guide on how each setting impacts end-to-end delay — including player buffering, server tuning, and recommended presets — see the [Live Streaming Tuning Guide](./live-streaming-tuning.md).
+:::
+
 ## FFmpeg Options Reference
 
 ### HLS Output Options

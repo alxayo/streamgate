@@ -38,6 +38,11 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'doc',
+      id: 'user-guide/live-streaming-tuning',
+      label: '🎛️ Live Streaming Tuning',
+    },
+    {
+      type: 'doc',
       id: 'user-guide/configuration',
       label: 'Configuration Reference',
     },

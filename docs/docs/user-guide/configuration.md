@@ -54,7 +54,7 @@ Set these in `platform/.env` or the root `.env` file.
 | `ADMIN_PASSWORD_HASH` | ✅ | — | bcrypt hash of the admin console password. Generate with `npm run hash-password`. |
 | `HLS_SERVER_BASE_URL` | ✅ | `http://localhost:4000` | Base URL of the HLS Media Server. In development, the actual URL sent to browsers is dynamically derived from the request's hostname (preserving the HLS server port), so LAN clients automatically get a reachable address. In production, set this to the public URL viewers will use. |
 | `NEXT_PUBLIC_APP_NAME` | ❌ | `StreamGate` | Application name displayed in the UI. The `NEXT_PUBLIC_` prefix makes it available in the browser. |
-| `SESSION_TIMEOUT_SECONDS` | ❌ | `60` | Seconds of missed heartbeats before a viewing session is considered abandoned and automatically released. Lower values free up tokens faster; higher values tolerate more network instability. |
+| `SESSION_TIMEOUT_SECONDS` | ❌ | `60` | Seconds of missed heartbeats before a viewing session is considered abandoned and automatically released. Lower values free up tokens faster; higher values tolerate more network instability. See [Live Streaming Tuning Guide](./live-streaming-tuning.md#session-timeout-session_timeout_seconds) for trade-offs. |
 
 ### Database URL Examples
 
@@ -95,9 +95,9 @@ Set these in `hls-server/.env` or the root `.env` file.
 | `STREAM_ROOT` | Conditional | `./streams` | Local filesystem path where HLS stream files are stored. Required for local or hybrid mode. |
 | `UPSTREAM_ORIGIN` | Conditional | — | Base URL of an upstream HLS origin server. Required for proxy or hybrid mode. |
 | `SEGMENT_CACHE_ROOT` | ❌ | `STREAM_ROOT/cache/` | Directory for caching segments fetched from the upstream origin. Only used in proxy/hybrid mode. |
-| `SEGMENT_CACHE_MAX_SIZE_GB` | ❌ | `50` | Maximum cache size in GB. When exceeded, least-recently-used segments are evicted. |
-| `SEGMENT_CACHE_MAX_AGE_HOURS` | ❌ | `72` | Maximum age of cached segments in hours. Segments older than this are automatically cleaned up. |
-| `REVOCATION_POLL_INTERVAL_MS` | ❌ | `30000` | How often (in milliseconds) to poll the Platform App for revocation updates. Lower values = faster revocation at the cost of more API calls. |
+| `SEGMENT_CACHE_MAX_SIZE_GB` | ❌ | `50` | Maximum cache size in GB. When exceeded, least-recently-used segments are evicted. See [Tuning Guide](./live-streaming-tuning.md#segment-cache-tuning-proxyhybrid-mode) for sizing guidance. |
+| `SEGMENT_CACHE_MAX_AGE_HOURS` | ❌ | `72` | Maximum age of cached segments in hours. Segments older than this are automatically cleaned up. See [Tuning Guide](./live-streaming-tuning.md#segment-cache-tuning-proxyhybrid-mode) for sizing guidance. |
+| `REVOCATION_POLL_INTERVAL_MS` | ❌ | `30000` | How often (in milliseconds) to poll the Platform App for revocation updates. Lower values = faster revocation at the cost of more API calls. See [Tuning Guide](./live-streaming-tuning.md#revocation-polling-revocation_poll_interval_ms) for trade-offs. |
 | `CORS_ALLOWED_ORIGIN` | ✅ | `http://localhost:3000` | Origin(s) allowed to make cross-origin requests to the HLS server. Must match the Platform App's public URL. Supports **comma-separated** values for multiple origins (e.g., `http://localhost:3000,http://192.168.0.11:3000`). |
 | `PORT` | ❌ | `4000` | Port the HLS server listens on. |
 
