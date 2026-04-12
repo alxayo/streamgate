@@ -67,8 +67,8 @@ With StreamGate's default settings (2-second segments, default hls.js configurat
 |-------|:------------:|:-------------:|
 | FFmpeg encoding | 0.1–0.5s | ✅ Preset and tune |
 | Segment duration | 2s | ✅ `-hls_time` |
-| Disk I/O | <0.1s (SSD) | ⚠️ Storage type |
-| HLS server processing | <0.01s | ❌ Negligible |
+| Disk I/O | &lt;0.1s (SSD) | ⚠️ Storage type |
+| HLS server processing | &lt;0.01s | ❌ Negligible |
 | Network transfer | 0.05–0.5s | ⚠️ Network dependent |
 | **Player buffering** | **~6s** | ✅ hls.js settings |
 | **Total** | **~6–8s** | |
