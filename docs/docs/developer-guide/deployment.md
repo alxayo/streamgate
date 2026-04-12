@@ -227,6 +227,10 @@ SQLite and PostgreSQL have subtle differences (e.g., case sensitivity, date hand
 
 ## Scaling Considerations
 
+:::tip Cloud Deployment
+For detailed Azure deployment architectures with scale-to-zero, CDN caching, and cost estimates for 10 to 10,000+ concurrent viewers, see the [Cloud Architecture (Azure)](./cloud-architecture/README.md) guide.
+:::
+
 ### Platform App
 
 - **Horizontal scaling**: Deploy multiple instances behind a load balancer

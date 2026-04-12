@@ -89,6 +89,16 @@ const sidebars: SidebarsConfig = {
       label: 'Deployment',
     },
     {
+      type: 'category',
+      label: '☁️ Cloud Architecture (Azure)',
+      items: [
+        'developer-guide/cloud-architecture/README',
+        'developer-guide/cloud-architecture/architecture-a-lift-and-shift',
+        'developer-guide/cloud-architecture/architecture-b-cloud-optimized',
+        'developer-guide/cloud-architecture/architecture-c-maximum-scale',
+      ],
+    },
+    {
       type: 'doc',
       id: 'developer-guide/contributing',
       label: 'Contributing',
