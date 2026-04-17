@@ -6,6 +6,10 @@ import { releaseSession } from '@/lib/api-client';
 /**
  * Release session on page close / navigation away (PDR §7.2).
  * Uses fetch with keepalive for reliability.
+ *
+ * Only fires on `beforeunload` (actual page close / navigation).
+ * Tab switches and minimizes are intentionally ignored — the server-side
+ * session timeout (SESSION_TIMEOUT_SECONDS) handles truly abandoned sessions.
  */
 export function useSessionRelease(getToken: () => string) {
   const getTokenRef = useRef(getToken);
@@ -17,15 +21,9 @@ export function useSessionRelease(getToken: () => string) {
     };
 
     window.addEventListener('beforeunload', handleRelease);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') {
-        handleRelease();
-      }
-    });
 
     return () => {
       window.removeEventListener('beforeunload', handleRelease);
-      handleRelease();
     };
   }, []);
 }
