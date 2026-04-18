@@ -25,15 +25,22 @@ interface QualityLevel {
 }
 
 /**
- * Detect Safari native HLS support (PDR §7.2).
+ * Check if the browser supports native HLS playback (old iOS Safari fallback).
+ * Only used when MSE / hls.js is unavailable.
  */
-function isSafariNative(): boolean {
-  if (typeof navigator === 'undefined') return false;
+function supportsNativeHls(): boolean {
+  if (typeof document === 'undefined') return false;
   const video = document.createElement('video');
-  return (
-    navigator.vendor?.includes('Apple') === true &&
-    video.canPlayType('application/vnd.apple.mpegurl') !== ''
-  );
+  return video.canPlayType('application/vnd.apple.mpegurl') !== '';
+}
+
+/** Webkit-safe requestFullscreen for Safari < 16.4. */
+function requestFullscreen(el: HTMLElement): void {
+  if (el.requestFullscreen) {
+    el.requestFullscreen();
+  } else if ((el as unknown as { webkitRequestFullscreen?: () => void }).webkitRequestFullscreen) {
+    (el as unknown as { webkitRequestFullscreen: () => void }).webkitRequestFullscreen();
+  }
 }
 
 export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: VideoPlayerProps) {
@@ -59,70 +66,70 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: Vide
     const video = videoRef.current;
     if (!video) return;
 
-    if (isSafariNative()) {
-      // Safari native HLS — append __token query parameter
+    // Prefer hls.js (works on Chrome, Firefox, and Safari with MSE — macOS 11+, iOS 15+)
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        xhrSetup: (xhr) => {
+          xhr.setRequestHeader('Authorization', `Bearer ${getToken()}`);
+        },
+        enableWorker: true,
+        lowLatencyMode: isLive,
+      });
+
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+        const levels = data.levels.map((level, i) => ({
+          index: i,
+          height: level.height,
+          label: `${level.height}p`,
+        }));
+        setQualityLevels(levels);
+        video.play().catch(() => {});
+      });
+
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        setCurrentQuality(data.level);
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          if (data.response?.code === 403) {
+            hls.destroy();
+            onStreamError?.('auth');
+          } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();
+            onStreamError?.('network');
+          } else {
+            hls.destroy();
+            onStreamError?.('network');
+          }
+        }
+      });
+
+      hlsRef.current = hls;
+
+      return () => {
+        hls.destroy();
+        hlsRef.current = null;
+      };
+    }
+
+    // Fallback: native HLS for old iOS Safari (< iOS 15) where MSE is unavailable
+    if (supportsNativeHls()) {
       const token = getToken();
       const url = new URL(streamUrl, window.location.origin);
       url.searchParams.set('__token', token);
       video.src = url.toString();
       video.play().catch(() => {});
-      return;
+
+      const onError = () => onStreamError?.('network');
+      video.addEventListener('error', onError);
+      return () => video.removeEventListener('error', onError);
     }
 
-    if (!Hls.isSupported()) {
-      console.error('HLS is not supported in this browser');
-      return;
-    }
-
-    const hls = new Hls({
-      xhrSetup: (xhr) => {
-        xhr.setRequestHeader('Authorization', `Bearer ${getToken()}`);
-      },
-      enableWorker: true,
-      lowLatencyMode: isLive,
-    });
-
-    hls.loadSource(streamUrl);
-    hls.attachMedia(video);
-
-    hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
-      const levels = data.levels.map((level, i) => ({
-        index: i,
-        height: level.height,
-        label: `${level.height}p`,
-      }));
-      setQualityLevels(levels);
-      video.play().catch(() => {});
-    });
-
-    hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
-      setCurrentQuality(data.level);
-    });
-
-    hls.on(Hls.Events.ERROR, (_event, data) => {
-      if (data.fatal) {
-        if (data.response?.code === 403) {
-          onStreamError?.('auth');
-        } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          // Try to recover
-          hls.startLoad();
-          if (data.response?.code === 403) {
-            onStreamError?.('auth');
-          } else {
-            onStreamError?.('network');
-          }
-        } else {
-          hls.destroy();
-        }
-      }
-    });
-
-    hlsRef.current = hls;
-
-    return () => {
-      hls.destroy();
-      hlsRef.current = null;
-    };
+    console.error('HLS is not supported in this browser');
   }, [streamUrl, isLive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Video event handlers
@@ -177,7 +184,7 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: Vide
           break;
         case 'f':
         case 'F':
-          containerRef.current?.requestFullscreen();
+          if (containerRef.current) requestFullscreen(containerRef.current);
           break;
         case 'm':
         case 'M':
@@ -271,7 +278,7 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: Vide
       className="relative w-full h-full bg-black group"
       onMouseMove={showControlsTemporarily}
       onClick={togglePlayPause}
-      onDoubleClick={() => containerRef.current?.requestFullscreen()}
+      onDoubleClick={() => { if (containerRef.current) requestFullscreen(containerRef.current); }}
     >
       <video
         ref={videoRef}
