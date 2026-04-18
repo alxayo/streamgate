@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, ArrowRight, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,20 +12,21 @@ import type { TokenValidationResponse } from '@streaming/shared';
 
 interface TokenEntryProps {
   appName: string;
+  initialCode?: string;
   onSuccess: (data: TokenValidationResponse, code: string) => void;
 }
 
 type SubmitState = 'idle' | 'loading' | 'success';
 
-export function TokenEntry({ appName, onSuccess }: TokenEntryProps) {
-  const [code, setCode] = useState('');
+export function TokenEntry({ appName, initialCode, onSuccess }: TokenEntryProps) {
+  const [code, setCode] = useState(initialCode || '');
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [error, setError] = useState<{ status: number; message: string } | null>(null);
+  const autoSubmitted = useRef(false);
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const trimmedCode = code.trim();
+  const submitCode = useCallback(
+    async (codeToSubmit: string) => {
+      const trimmedCode = codeToSubmit.trim();
 
       if (!trimmedCode) return;
 
@@ -56,8 +57,24 @@ export function TokenEntry({ appName, onSuccess }: TokenEntryProps) {
         setError({ status, message });
       }
     },
-    [code, onSuccess],
+    [onSuccess],
   );
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      submitCode(code);
+    },
+    [code, submitCode],
+  );
+
+  // Auto-submit when initialCode is provided (e.g., from QR code URL)
+  useEffect(() => {
+    if (initialCode && !autoSubmitted.current) {
+      autoSubmitted.current = true;
+      submitCode(initialCode);
+    }
+  }, [initialCode, submitCode]);
 
   return (
     <Card className="w-full max-w-md mx-auto border-gray-700/50 bg-charcoal/90 backdrop-blur-sm">

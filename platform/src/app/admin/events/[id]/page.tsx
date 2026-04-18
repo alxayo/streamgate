@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users } from 'lucide-react';
+import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users, QrCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EventStatusBadge } from '@/components/admin/event-status-badge';
@@ -16,6 +16,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { TokenQrDialog } from '@/components/admin/token-qr-dialog';
 
 interface EventDetail {
   id: string;
@@ -58,6 +59,7 @@ export default function EventDetailPage() {
   const [generatedTokens, setGeneratedTokens] = useState<Token[]>([]);
   const [deleteConfirmTitle, setDeleteConfirmTitle] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [qrCode, setQrCode] = useState<string | null>(null);
 
   const fetchEvent = async () => {
     try {
@@ -225,6 +227,9 @@ export default function EventDetailPage() {
                     <button onClick={() => copyCode(token.code, token.id)} className="text-gray-400 hover:text-gray-600">
                       {copiedId === token.id ? <Check className="h-3.5 w-3.5 text-status-active" /> : <Copy className="h-3.5 w-3.5" />}
                     </button>
+                    <button onClick={() => setQrCode(token.code)} className="text-gray-400 hover:text-gray-600" title="Show QR code">
+                      <QrCode className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-600">{token.label || '—'}</td>
@@ -325,6 +330,9 @@ export default function EventDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* QR Code Dialog */}
+      <TokenQrDialog code={qrCode} open={qrCode !== null} onOpenChange={(open) => { if (!open) setQrCode(null); }} />
     </div>
   );
 }

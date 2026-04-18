@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Ban, Copy, Check, Search } from 'lucide-react';
+import { Ban, Copy, Check, Search, QrCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TokenStatusBadge } from '@/components/admin/token-status-badge';
@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { TokenQrDialog } from '@/components/admin/token-qr-dialog';
 
 interface Token {
   id: string;
@@ -33,6 +34,7 @@ export default function TokensPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [qrCode, setQrCode] = useState<string | null>(null);
 
   const fetchTokens = async () => {
     setLoading(true);
@@ -170,6 +172,9 @@ export default function TokensPage() {
                         <button onClick={() => copyCode(token.code, token.id)} className="text-gray-400 hover:text-gray-600">
                           {copiedId === token.id ? <Check className="h-3.5 w-3.5 text-status-active" /> : <Copy className="h-3.5 w-3.5" />}
                         </button>
+                        <button onClick={() => setQrCode(token.code)} className="text-gray-400 hover:text-gray-600" title="Show QR code">
+                          <QrCode className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{token.event?.title || '—'}</td>
@@ -212,6 +217,9 @@ export default function TokensPage() {
           )}
         </>
       )}
+
+      {/* QR Code Dialog */}
+      <TokenQrDialog code={qrCode} open={qrCode !== null} onOpenChange={(open) => { if (!open) setQrCode(null); }} />
     </div>
   );
 }

@@ -37,6 +37,7 @@
     "lucide-react": "^0.577.0",
     "next": "^16.2.3",
     "prisma": "^7.4.2",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "tailwind-merge": "^3.5.0"
