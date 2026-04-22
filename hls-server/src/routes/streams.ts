@@ -35,7 +35,7 @@ export function createStreamRoutes(
         return;
       }
 
-      const filename = path.basename(wildcardPath);
+      const filename = wildcardPath;
       const ext = path.extname(filename).toLowerCase();
 
       // Validate file extension
