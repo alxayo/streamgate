@@ -67,6 +67,9 @@ param hlsServerBaseUrl string = ''
 @description('CORS allowed origin for HLS server (the platform app domain)')
 param corsAllowedOrigin string = ''
 
+@description('IP address allowed to access the admin console (empty = no restriction)')
+param adminAllowedIp string = ''
+
 // ---------- Variables ----------
 
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location, environmentName)
@@ -89,6 +92,12 @@ resource fileService 'Microsoft.Storage/storageAccounts/fileServices@2023-05-01'
 }
 
 // ---------- Azure Files Shares (StreamGate-specific) ----------
+
+// Reference the existing hls-output storage mount (created by rtmp-go deployment, ReadWrite)
+resource hlsOutputStorage 'Microsoft.App/managedEnvironments/storages@2024-03-01' existing = {
+  name: 'hls-output'
+  parent: containerEnv
+}
 
 resource streamgateDataShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-05-01' = {
   name: 'streamgate-data'
@@ -134,19 +143,6 @@ resource segmentCacheStorage 'Microsoft.App/managedEnvironments/storages@2024-03
   }
 }
 
-resource hlsOutputReadOnly 'Microsoft.App/managedEnvironments/storages@2024-03-01' = {
-  name: 'hls-output-ro'
-  parent: containerEnv
-  properties: {
-    azureFile: {
-      accountName: storageAccount.name
-      accountKey: storageAccount.listKeys().keys[0].value
-      shareName: hlsOutputShareName
-      accessMode: 'ReadOnly'
-    }
-  }
-}
-
 // ---------- Container App: streamgate-hls ----------
 // HLS media server — must be defined BEFORE platform so we can reference its FQDN.
 // Validates JWT on every .m3u8 / .ts request. Serves from Azure Files (local)
@@ -164,6 +160,7 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: containerEnv.id
     configuration: {
+      activeRevisionsMode: 'Single'
       registries: [
         {
           server: registryLoginServer
@@ -214,7 +211,7 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               name: 'UPSTREAM_ORIGIN'
-              value: 'https://${storageAccountName}.blob.core.windows.net/hls-content'
+              value: 'https://${storageAccountName}.blob.core.windows.net/hls-content/hls'
             }
             {
               name: 'STREAM_KEY_PREFIX'
@@ -262,7 +259,7 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
       volumes: [
         {
           name: 'hls-output'
-          storageName: hlsOutputReadOnly.name
+          storageName: hlsOutputStorage.name
           storageType: 'AzureFile'
         }
         {
@@ -295,6 +292,7 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: containerEnv.id
     configuration: {
+      activeRevisionsMode: 'Single'
       registries: [
         {
           server: registryLoginServer
@@ -358,6 +356,10 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'SESSION_TIMEOUT_SECONDS'
               value: '60'
+            }
+            {
+              name: 'ADMIN_ALLOWED_IP'
+              value: adminAllowedIp
             }
           ]
           volumeMounts: [

@@ -14,6 +14,7 @@
 #   ADMIN_PASSWORD_HASH       — bcrypt hash of admin password (required)
 #   HLS_SERVER_BASE_URL       — override HLS server public URL (optional)
 #   CORS_ALLOWED_ORIGIN       — override CORS origin (optional)
+#   ADMIN_ALLOWED_IP          — IP allowed to access /admin (auto-detected if empty)
 #
 # Prerequisites:
 #   - Azure CLI logged in (az login)
@@ -118,6 +119,14 @@ fi
 
 echo "    Secrets configured."
 
+# --- Detect admin IP ---
+if [ -z "${ADMIN_ALLOWED_IP:-}" ]; then
+  ADMIN_ALLOWED_IP=$(curl -s https://ifconfig.me || echo "")
+  if [ -n "$ADMIN_ALLOWED_IP" ]; then
+    echo "    Auto-detected admin IP: $ADMIN_ALLOWED_IP"
+  fi
+fi
+
 # --- Step 4: Deploy Bicep infrastructure (first pass — placeholder images) ---
 echo ""
 echo ">>> Step 4/7: Deploying infrastructure (Bicep — first pass)..."
@@ -136,6 +145,7 @@ DEPLOY_OUTPUT=$(az deployment group create \
     playbackSigningSecret="$PLAYBACK_SIGNING_SECRET" \
     internalApiKey="$INTERNAL_API_KEY" \
     adminPasswordHash="$ADMIN_PASSWORD_HASH" \
+    adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
   --query 'properties.outputs' \
   --output json)
 
@@ -194,6 +204,7 @@ DEPLOY_OUTPUT=$(az deployment group create \
     hlsServerImage="${REGISTRY_LOGIN_SERVER}/streamgate-hls:latest" \
     hlsServerBaseUrl="$EFFECTIVE_HLS_BASE_URL" \
     corsAllowedOrigin="$EFFECTIVE_CORS_ORIGIN" \
+    adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
   --query 'properties.outputs' \
   --output json)
 
