@@ -25,7 +25,7 @@ export async function POST(
   return NextResponse.json({
     playbackToken: token,
     playbackBaseUrl: getHlsBaseUrl(_request.headers.get('host')),
-    streamPath: `/streams/${event.id}/stream.m3u8`,
+    streamPath: `/streams/${event.id}/master.m3u8`,
     tokenExpiresIn: expiresIn,
     event: {
       title: event.title,

@@ -10,7 +10,7 @@ export async function probeStreamLive(eventId: string): Promise<boolean> {
     const { mintProbeToken } = await import('./jwt');
     const probeJwt = await mintProbeToken(eventId);
 
-    const manifestUrl = `${env.HLS_SERVER_BASE_URL}/streams/${eventId}/stream.m3u8`;
+    const manifestUrl = `${env.HLS_SERVER_BASE_URL}/streams/${eventId}/master.m3u8`;
     const response = await fetch(manifestUrl, {
       method: 'HEAD',
       headers: { Authorization: `Bearer ${probeJwt}` },

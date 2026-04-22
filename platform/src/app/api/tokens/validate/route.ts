@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
     },
     playbackToken,
     playbackBaseUrl: getHlsBaseUrl(request.headers.get('host')),
-    streamPath: `/streams/${token.eventId}/stream.m3u8`,
+    streamPath: `/streams/${token.eventId}/master.m3u8`,
     expiresAt: token.expiresAt.toISOString(),
     tokenExpiresIn: expiresIn,
   });
