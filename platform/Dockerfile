@@ -32,6 +32,10 @@ COPY --from=base /app/node_modules/ ./node_modules/
 
 WORKDIR /app/platform
 
+# Entrypoint runs Prisma migrations before starting the server
+COPY platform/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x docker-entrypoint.sh
+
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["./docker-entrypoint.sh"]
