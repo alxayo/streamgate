@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "streamgate"
+    },
+    "location": {
+      "value": "eastus2"
+    },
+    "containerEnvName": {
+      "value": ""
+    },
+    "registryLoginServer": {
+      "value": ""
+    },
+    "identityId": {
+      "value": ""
+    },
+    "identityClientId": {
+      "value": ""
+    },
+    "storageAccountName": {
+      "value": ""
+    },
+    "playbackSigningSecret": {
+      "value": ""
+    },
+    "internalApiKey": {
+      "value": ""
+    },
+    "adminPasswordHash": {
+      "value": ""
+    }
+  }
+}
