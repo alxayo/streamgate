@@ -13,36 +13,76 @@ Deploy StreamGate (ticket-gated HLS streaming platform) into the **same Azure Co
                     │  │ TCP :1935    │ hook │ FFmpeg ABR        │         │
                     │  └──────────────┘      │ 1080p/720p/480p  │         │
                     │                        └────────┬─────────┘         │
-                    │                                 │ writes            │
+                    │                            writes│                  │
                     │                                 ▼                   │
-                    │                        ┌────────────────┐           │
-                    │                        │  Azure Files   │           │
-                    │                        │  hls-output    │           │
-                    │                        └───────┬────────┘           │
-                    │                     read-only  │                    │
-                    │                                ▼                    │
-   Viewer ─────────────────────────────▶ ┌────────────────────┐          │
-   (Browser)        │                    │ streamgate-hls     │          │
-   ticket code ─────────────────────▶ ┌──┤ Express :4000      │          │
-                    │                 │  │ JWT validation     │          │
-                    │                 │  │ per-request auth   │          │
-                    │                 │  └────────────────────┘          │
-                    │                 │           ▲ polls                │
-                    │                 │           │ /api/revocations     │
-                    │                 │           │                      │
-                    │                 │  ┌────────┴───────────┐          │
-                    │                 └──▶ streamgate-platform│          │
-                    │                    │ Next.js :3000      │          │
-                    │                    │ Viewer portal      │          │
-                    │                    │ Admin console      │          │
-                    │                    │ JWT issuance       │          │
-                    │                    └────────────────────┘          │
+                    │   ┌──────────────┐     ┌────────────────┐           │
+                    │   │ blob-sidecar │◀────│  Azure Files   │           │
+                    │   │ syncs to blob│     │  hls-output    │           │
+                    │   └──────┬───────┘     └───────┬────────┘           │
+                    │          │                     │ mount (RW)         │
+                    │          ▼                     ▼                    │
+                    │  ┌───────────────┐    ┌────────────────────┐        │
+                    │  │ Blob Storage  │◀───│ streamgate-hls     │        │
+                    │  │ hls-content   │fall│ Express :4000      │        │
+                    │  │ /hls/live_*   │back│ JWT validation     │        │
+                    │  └───────────────┘    │ local → cache →    │        │
+   Viewer ─────────────────────────────▶    │   upstream proxy   │        │
+   (Browser)        │                       └──────────────────┬─┘        │
+   ticket code ─────────────────────▶ ┌────────────────────────┘         │
+                    │                 │           ▲ polls                 │
+                    │                 │           │ /api/revocations      │
+                    │                 │  ┌────────┴───────────┐           │
+                    │                 └──▶ streamgate-platform│           │
+                    │                    │ Next.js :3000      │           │
+                    │                    │ Viewer portal      │           │
+                    │                    │ Admin console      │           │
+                    │                    │ JWT issuance       │           │
+                    │                    └────────────────────┘           │
                     └──────────────────────────────────────────────────────┘
 ```
 
 **Shared resources** (from rtmp-go): ACR, Storage Account, Managed Identity, VNet, Log Analytics
 
 **StreamGate-specific resources**: 2 Container Apps, 2 Azure Files shares, 3 storage mounts
+
+### HLS Content Delivery Chain
+
+The HLS server resolves content through a three-tier fallback:
+
+1. **Local mount** — Azure Files `hls-output` share mounted at `/hls-output`
+2. **Segment cache** — Cached segments from previous upstream fetches at `/segment-cache`
+3. **Upstream proxy** — Blob Storage at `https://<storage>.blob.core.windows.net/hls-content/hls/`
+
+> **Important**: The blob sidecar (from rtmp-go) uploads HLS content to `hls-content/hls/live_{eventId}/`. The `UPSTREAM_ORIGIN` env var must include the `/hls` path prefix to match this structure.
+
+> **Azure Files SMB caching**: Container Apps mount Azure Files via SMB (CIFS), which aggressively caches directory listings. Newly written files may not appear on the mounted filesystem for several minutes. The upstream proxy to Blob Storage mitigates this — blob storage reflects writes immediately. For live streams, the upstream proxy is the primary content source.
+
+### ABR Manifest Structure
+
+The HLS transcoder produces adaptive bitrate output:
+
+```
+live_{eventId}/
+├── master.m3u8           # ABR master playlist (references sub-streams)
+├── stream_0/index.m3u8   # 1080p variant
+├── stream_0/seg_00001.ts
+├── stream_1/index.m3u8   # 720p variant
+├── stream_1/seg_00001.ts
+├── stream_2/index.m3u8   # 480p variant
+└── stream_2/seg_00001.ts
+```
+
+The master manifest is `master.m3u8` (not `stream.m3u8`). The platform's stream probe, token validation, and admin preview all reference this filename.
+
+### SQLite on Azure Files
+
+SQLite requires POSIX file locking which Azure Files (SMB) does not fully support. The platform's `docker-entrypoint.sh` works around this by:
+
+1. Copying the database from the persistent mount (`/data/streamgate.db`) to local disk (`/tmp/streamgate.db`)
+2. Running Prisma migrations and the Next.js server against the local copy
+3. Syncing the local copy back to the mount every 60 seconds and on container exit
+
+This means there is up to 60 seconds of data loss if the container crashes without a clean shutdown. For production, migrate to PostgreSQL.
 
 ## Prerequisites
 
@@ -145,6 +185,7 @@ INTERNAL_API_KEY="..." \
 | `ADMIN_PASSWORD_HASH` | (required) | Bcrypt hash of admin password |
 | `HLS_SERVER_BASE_URL` | (auto: ACA FQDN) | Public URL of HLS server (override after DNS setup) |
 | `CORS_ALLOWED_ORIGIN` | (auto: ACA FQDN) | CORS origin for HLS server |
+| `ADMIN_ALLOWED_IP` | (auto-detected) | IP address allowed to access `/admin`. Auto-detected via ifconfig.me if empty. Set to empty string to disable restriction. |
 
 ### dns-deploy.sh
 
@@ -206,6 +247,35 @@ az containerapp logs show -n <app-name> -g rg-rtmpgo --type console
 ### CORS errors in browser
 Verify `CORS_ALLOWED_ORIGIN` matches the platform app's public URL exactly (including protocol). After DNS setup, redeploy with `CORS_ALLOWED_ORIGIN=https://watch.port-80.com`.
 
+### Player loads but no video / "Stream source unavailable"
+Verify the full content delivery chain:
+
+1. **Check blob storage** — segments should exist at `hls-content/hls/live_{eventId}/`:
+   ```bash
+   az storage blob list --account-name <storage> --container-name hls-content \
+     --prefix "hls/live_{eventId}/" --query "[].name" -o tsv | head
+   ```
+2. **Check blob public access** — must be enabled for upstream proxy fallback:
+   ```bash
+   az storage account show -n <storage> --query allowBlobPublicAccess
+   az storage container show -n hls-content --account-name <storage> --query properties.publicAccess
+   ```
+3. **Check UPSTREAM_ORIGIN** — must include `/hls` prefix:
+   ```bash
+   az containerapp show -n <hls-app> -g rg-rtmpgo \
+     --query "properties.template.containers[0].env[?name=='UPSTREAM_ORIGIN'].value" -o tsv
+   # Should be: https://<storage>.blob.core.windows.net/hls-content/hls
+   ```
+4. **Check HLS_SERVER_BASE_URL** — the `playbackBaseUrl` returned to the browser must point to the HLS server, not the platform:
+   ```bash
+   az containerapp show -n <platform-app> -g rg-rtmpgo \
+     --query "properties.template.containers[0].env[?name=='HLS_SERVER_BASE_URL'].value" -o tsv
+   # Should be: https://hls.port-80.com (not watch.port-80.com)
+   ```
+
+### Azure Files shows empty directories (SMB cache)
+Azure Container Apps mount Azure Files via SMB with aggressive attribute caching. Files written by the transcoder may not appear to the HLS server for several minutes. This is expected — the upstream proxy to Blob Storage handles content delivery. The local mount is a best-effort optimization.
+
 ### Revocation sync failures
 Check HLS server health: `curl https://<hls-fqdn>/health`
 Verify `INTERNAL_API_KEY` matches between platform and HLS server.
@@ -219,7 +289,19 @@ az storage file list --share-name hls-output --account-name <storage> --output t
 Check that `STREAM_KEY_PREFIX=live_` is set on the HLS server (it maps `{eventId}` to `live_{eventId}` on disk).
 
 ### Database issues
-SQLite database is stored on the `streamgate-data` Azure Files share at `/data/streamgate.db`. The entrypoint script runs `prisma migrate deploy` on every container start. Check container startup logs for migration errors.
+SQLite database is stored on the `streamgate-data` Azure Files share at `/data/streamgate.db`. The entrypoint copies it to local disk (`/tmp/`) for POSIX locking compatibility. Check container startup logs for migration errors:
+```bash
+az containerapp logs show -n <platform-app> -g rg-rtmpgo --type console | head -20
+```
+
+### Admin console returns 403
+If `ADMIN_ALLOWED_IP` is set, only that IP can access `/admin` and `/api/admin/*`. Check your current IP matches:
+```bash
+curl -s https://ifconfig.me
+az containerapp show -n <platform-app> -g rg-rtmpgo \
+  --query "properties.template.containers[0].env[?name=='ADMIN_ALLOWED_IP'].value" -o tsv
+```
+To disable the restriction, set `ADMIN_ALLOWED_IP` to an empty string.
 
 ## Files
 

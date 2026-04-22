@@ -55,9 +55,12 @@ Place HLS content in the streams directory:
 ```
 streams/
 └── <event-id>/
-    ├── stream.m3u8
-    └── segment-000.ts
+    ├── master.m3u8          # ABR master playlist (or single-variant)
+    ├── stream_0/index.m3u8  # Variant playlist
+    └── stream_0/seg_000.ts
 ```
+
+> **Note**: The platform references `master.m3u8` as the entry-point manifest. If using FFmpeg's HLS muxer with ABR, use `-master_pl_name master.m3u8`.
 
 ### 6. Start Development Servers
 
