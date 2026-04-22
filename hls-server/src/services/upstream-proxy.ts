@@ -8,7 +8,8 @@ export class UpstreamProxy {
    * Convention: UPSTREAM_ORIGIN/:eventId/:filename (PDR §6.3)
    */
   buildUpstreamUrl(eventId: string, filename: string): string {
-    return `${this.config.upstreamOrigin}/${eventId}/${filename}`;
+    const dirName = this.config.streamKeyPrefix + eventId;
+    return `${this.config.upstreamOrigin}/${dirName}/${filename}`;
   }
 
   /**

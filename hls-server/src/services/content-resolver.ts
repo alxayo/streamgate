@@ -13,7 +13,8 @@ export class ContentResolver {
   async resolveLocal(eventId: string, filename: string): Promise<string | null> {
     if (!this.config.streamRoot) return null;
 
-    const filePath = resolveSecurePath(this.config.streamRoot, path.join(eventId, filename));
+    const dirName = this.config.streamKeyPrefix + eventId;
+    const filePath = resolveSecurePath(this.config.streamRoot, path.join(dirName, filename));
     if (!filePath) return null;
 
     try {
@@ -30,9 +31,10 @@ export class ContentResolver {
   async resolveCache(eventId: string, filename: string): Promise<string | null> {
     if (!this.config.segmentCacheRoot) return null;
 
+    const dirName = this.config.streamKeyPrefix + eventId;
     const filePath = resolveSecurePath(
       this.config.segmentCacheRoot,
-      path.join(eventId, filename),
+      path.join(dirName, filename),
     );
     if (!filePath) return null;
 

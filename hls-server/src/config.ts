@@ -27,6 +27,7 @@ export function loadConfig() {
     segmentCacheMaxAgeHours: parseInt(process.env.SEGMENT_CACHE_MAX_AGE_HOURS || '72', 10),
     revocationPollIntervalMs: parseInt(process.env.REVOCATION_POLL_INTERVAL_MS || '30000', 10),
     corsAllowedOrigin: requireEnv('CORS_ALLOWED_ORIGIN'),
+    streamKeyPrefix: process.env.STREAM_KEY_PREFIX || '',
   };
 }
 
