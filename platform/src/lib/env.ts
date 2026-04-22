@@ -82,9 +82,13 @@ export function getHlsBaseUrl(requestHost: string | null): string {
     const hlsUrl = new URL(configured);
     // Extract hostname from request Host header (strip port if present)
     const reqHostname = requestHost.replace(/:\d+$/, '');
-    hlsUrl.hostname = reqHostname;
-    // Remove trailing slash
-    return hlsUrl.origin;
+    // Only replace hostname when running on localhost (dev mode with different ports)
+    // In production with separate subdomains, return configured URL as-is
+    if (reqHostname === 'localhost' || reqHostname === '127.0.0.1') {
+      hlsUrl.hostname = reqHostname;
+      return hlsUrl.origin;
+    }
+    return configured;
   } catch {
     return configured;
   }
