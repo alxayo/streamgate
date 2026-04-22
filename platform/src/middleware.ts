@@ -2,8 +2,31 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getIronSession } from 'iron-session';
 import type { SessionData } from '@/lib/admin-session';
 
+function getClientIp(request: NextRequest): string {
+  // Azure Container Apps / reverse proxies set X-Forwarded-For
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  return request.headers.get('x-real-ip') ?? 'unknown';
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // IP-based admin access restriction (if ADMIN_ALLOWED_IP is set)
+  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    const allowedIp = process.env.ADMIN_ALLOWED_IP;
+    if (allowedIp) {
+      const clientIp = getClientIp(request);
+      if (clientIp !== allowedIp) {
+        if (pathname.startsWith('/api/admin')) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+        return new NextResponse('Forbidden', { status: 403 });
+      }
+    }
+  }
 
   // Skip login page and public API endpoints
   if (

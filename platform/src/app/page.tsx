@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { TokenEntry } from '@/components/viewer/token-entry';
 import { PlayerScreen } from '@/components/viewer/player-screen';
 import { Toaster } from '@/components/ui/toaster';
 import type { TokenValidationResponse } from '@streaming/shared';
 
-export default function Home() {
+function HomeContent() {
   const searchParams = useSearchParams();
   const initialCode = searchParams.get('code') || undefined;
 
@@ -38,5 +38,13 @@ export default function Home() {
       />
       <Toaster />
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeContent />
+    </Suspense>
   );
 }

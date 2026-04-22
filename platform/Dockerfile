@@ -13,8 +13,8 @@ RUN npm ci --workspace=@streaming/platform
 # Copy platform source
 COPY platform/ ./platform/
 
-# Generate Prisma client
-RUN cd platform && npx prisma generate
+# Generate Prisma client (DATABASE_URL required at build time for config resolution)
+RUN cd platform && DATABASE_URL=file:/tmp/build.db npx prisma generate
 
 # Build Next.js
 RUN cd platform && npm run build
@@ -29,6 +29,9 @@ COPY --from=base /app/package.json ./
 COPY --from=base /app/shared/ ./shared/
 COPY --from=base /app/platform/ ./platform/
 COPY --from=base /app/node_modules/ ./node_modules/
+
+# Remove dev .env files so runtime uses Container Apps env vars, not stale build-time values
+RUN rm -f ./platform/.env ./platform/.env.local ./.env ./.env.local
 
 WORKDIR /app/platform
 
