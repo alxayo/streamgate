@@ -70,6 +70,10 @@ param corsAllowedOrigin string = ''
 @description('IP address allowed to access the admin console (empty = no restriction)')
 param adminAllowedIp string = ''
 
+@description('RTMP auth token for validating publish requests from the RTMP server callback')
+@secure()
+param rtmpAuthToken string = ''
+
 @description('Platform app URL for HLS server revocation polling (set on second deploy pass)')
 param platformAppUrl string = ''
 
@@ -317,6 +321,12 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'admin-password-hash'
           value: adminPasswordHash
         }
+        ...(!empty(rtmpAuthToken) ? [
+          {
+            name: 'rtmp-auth-token'
+            value: rtmpAuthToken
+          }
+        ] : [])
       ]
     }
     template: {
@@ -361,6 +371,12 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'ADMIN_ALLOWED_IP'
               value: adminAllowedIp
             }
+            ...(!empty(rtmpAuthToken) ? [
+              {
+                name: 'RTMP_AUTH_TOKEN'
+                secretRef: 'rtmp-auth-token'
+              }
+            ] : [])
           ]
           volumeMounts: [
             {
