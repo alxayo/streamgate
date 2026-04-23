@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import type { Response } from 'express';
 import type { AuthenticatedRequest } from '../types.js';
@@ -7,6 +8,7 @@ import type { ContentResolver } from '../services/content-resolver.js';
 import type { UpstreamProxy } from '../services/upstream-proxy.js';
 import type { SegmentCache } from '../services/segment-cache.js';
 import type { InflightDeduplicator } from '../services/inflight-dedup.js';
+import type { ServerConfig } from '../config.js';
 
 const MIME_TYPES: Record<string, string> = {
   '.m3u8': 'application/vnd.apple.mpegurl',
@@ -17,11 +19,48 @@ const MIME_TYPES: Record<string, string> = {
 
 const ALLOWED_EXTENSIONS = new Set(['.m3u8', '.ts', '.fmp4', '.mp4']);
 
+// ABR rendition definitions matching the transcoder's output
+const ABR_RENDITIONS = [
+  { dir: 'stream_0', bandwidth: 5192000, resolution: '1920x1080' },
+  { dir: 'stream_1', bandwidth: 2628000, resolution: '1280x720' },
+  { dir: 'stream_2', bandwidth: 1096000, resolution: '854x480' },
+];
+
+/**
+ * Generate a master.m3u8 dynamically by checking which variant stream
+ * directories actually exist on disk. This provides a fallback when
+ * the transcoder's master.m3u8 doesn't persist on Azure Files SMB.
+ */
+async function generateMasterPlaylist(
+  streamRoot: string,
+  streamKeyPrefix: string,
+  eventId: string,
+): Promise<string | null> {
+  const eventDir = path.join(streamRoot, streamKeyPrefix + eventId);
+  const lines: string[] = ['#EXTM3U', '#EXT-X-VERSION:3'];
+  let found = 0;
+
+  for (const r of ABR_RENDITIONS) {
+    try {
+      await fsPromises.access(path.join(eventDir, r.dir, 'index.m3u8'));
+      lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.resolution}`);
+      lines.push(`${r.dir}/index.m3u8`);
+      found++;
+    } catch {
+      // Variant not available yet
+    }
+  }
+
+  if (found === 0) return null;
+  return lines.join('\n') + '\n';
+}
+
 export function createStreamRoutes(
   contentResolver: ContentResolver,
   upstreamProxy: UpstreamProxy | null,
   segmentCache: SegmentCache,
   inflightDedup: InflightDeduplicator,
+  config: ServerConfig,
 ) {
   const router = Router();
 
@@ -93,6 +132,20 @@ export function createStreamRoutes(
         const stream = fs.createReadStream(localPath);
         stream.pipe(res);
         return;
+      }
+
+      // 1b. Dynamic master.m3u8 generation fallback — when the file doesn't
+      // exist on Azure Files SMB (known persistence issue with os.WriteFile),
+      // generate it from the variant directories that DO exist.
+      if (filename === 'master.m3u8' && config.streamRoot) {
+        const generated = await generateMasterPlaylist(config.streamRoot, config.streamKeyPrefix, eventId);
+        if (generated) {
+          console.log(`[dynamic-master] Generated master.m3u8 for event ${eventId} (local file missing)`);
+          res.set('Content-Type', 'application/vnd.apple.mpegurl');
+          res.set('Cache-Control', 'no-cache, no-store');
+          res.send(generated);
+          return;
+        }
       }
 
       // 2. Check segment cache (not for manifests — PDR §6.3)

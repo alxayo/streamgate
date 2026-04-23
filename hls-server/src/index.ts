@@ -43,7 +43,7 @@ app.use(createAdminCacheRoute(segmentCache, config));
 // Routes (JWT auth)
 const jwtAuth = createJwtAuthMiddleware(jwtVerifier, revocationCache);
 app.use('/streams', jwtAuth);
-app.use(createStreamRoutes(contentResolver, upstreamProxy, segmentCache, inflightDedup));
+app.use(createStreamRoutes(contentResolver, upstreamProxy, segmentCache, inflightDedup, config));
 
 // Error handler (must be last)
 app.use(createErrorHandler());
