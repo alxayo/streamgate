@@ -100,12 +100,6 @@ resource fileService 'Microsoft.Storage/storageAccounts/fileServices@2023-05-01'
 
 // ---------- Azure Files Shares (StreamGate-specific) ----------
 
-// Reference the existing hls-output storage mount (created by rtmp-go deployment, ReadWrite)
-resource hlsOutputStorage 'Microsoft.App/managedEnvironments/storages@2024-03-01' existing = {
-  name: 'hls-output'
-  parent: containerEnv
-}
-
 resource streamgateDataShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-05-01' = {
   name: 'streamgate-data'
   parent: fileService
@@ -152,8 +146,8 @@ resource segmentCacheStorage 'Microsoft.App/managedEnvironments/storages@2024-03
 
 // ---------- Container App: streamgate-hls ----------
 // HLS media server — must be defined BEFORE platform so we can reference its FQDN.
-// Validates JWT on every .m3u8 / .ts request. Serves from Azure Files (local)
-// with Blob Storage fallback (upstream proxy). Polls platform for revocations.
+// Validates JWT on every .m3u8 / .ts request. Serves directly from Blob Storage
+// (upstream proxy mode) — no Azure Files SMB mount needed. Polls platform for revocations.
 
 resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: hlsAppName
@@ -219,10 +213,6 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
               secretRef: 'internal-api-key'
             }
             {
-              name: 'STREAM_ROOT'
-              value: '/hls-output'
-            }
-            {
               name: 'UPSTREAM_ORIGIN'
               value: 'https://${storageAccountName}.blob.core.windows.net/hls-content/hls'
             }
@@ -265,10 +255,6 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
           ]
           volumeMounts: [
             {
-              volumeName: 'hls-output'
-              mountPath: '/hls-output'
-            }
-            {
               volumeName: 'segment-cache'
               mountPath: '/segment-cache'
             }
@@ -276,11 +262,6 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
         }
       ]
       volumes: [
-        {
-          name: 'hls-output'
-          storageName: hlsOutputStorage.name
-          storageType: 'AzureFile'
-        }
         {
           name: 'segment-cache'
           storageName: segmentCacheStorage.name

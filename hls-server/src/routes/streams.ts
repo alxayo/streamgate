@@ -55,6 +55,40 @@ async function generateMasterPlaylist(
   return lines.join('\n') + '\n';
 }
 
+/**
+ * Generate a master.m3u8 dynamically by probing the upstream origin for
+ * variant playlists. Used in proxy/blob-only mode where there is no local
+ * filesystem to check.
+ */
+async function generateMasterPlaylistFromUpstream(
+  upstreamProxy: UpstreamProxy,
+  eventId: string,
+): Promise<string | null> {
+  const lines: string[] = ['#EXTM3U', '#EXT-X-VERSION:3'];
+  let found = 0;
+
+  const probes = ABR_RENDITIONS.map(async (r) => {
+    try {
+      await upstreamProxy.fetch(eventId, `${r.dir}/index.m3u8`);
+      return r;
+    } catch {
+      return null;
+    }
+  });
+
+  const results = await Promise.all(probes);
+  for (const r of results) {
+    if (r) {
+      lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.resolution}`);
+      lines.push(`${r.dir}/index.m3u8`);
+      found++;
+    }
+  }
+
+  if (found === 0) return null;
+  return lines.join('\n') + '\n';
+}
+
 export function createStreamRoutes(
   contentResolver: ContentResolver,
   upstreamProxy: UpstreamProxy | null,
@@ -141,6 +175,19 @@ export function createStreamRoutes(
         const generated = await generateMasterPlaylist(config.streamRoot, config.streamKeyPrefix, eventId);
         if (generated) {
           console.log(`[dynamic-master] Generated master.m3u8 for event ${eventId} (local file missing)`);
+          res.set('Content-Type', 'application/vnd.apple.mpegurl');
+          res.set('Cache-Control', 'no-cache, no-store');
+          res.send(generated);
+          return;
+        }
+      }
+
+      // 1c. Dynamic master.m3u8 from upstream — in proxy/blob-only mode,
+      // probe the upstream for variant playlists and synthesize master.m3u8.
+      if (filename === 'master.m3u8' && !config.streamRoot && upstreamProxy) {
+        const generated = await generateMasterPlaylistFromUpstream(upstreamProxy, eventId);
+        if (generated) {
+          console.log(`[dynamic-master] Generated master.m3u8 for event ${eventId} from upstream (proxy mode)`);
           res.set('Content-Type', 'application/vnd.apple.mpegurl');
           res.set('Cache-Control', 'no-cache, no-store');
           res.send(generated);

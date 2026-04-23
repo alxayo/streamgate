@@ -43,19 +43,17 @@ Deploy StreamGate (ticket-gated HLS streaming platform) into the **same Azure Co
 
 **Shared resources** (from rtmp-go): ACR, Storage Account, Managed Identity, VNet, Log Analytics
 
-**StreamGate-specific resources**: 2 Container Apps, 2 Azure Files shares, 3 storage mounts
+**StreamGate-specific resources**: 2 Container Apps, 1 Azure Files share (segment cache), 1 storage mount
 
 ### HLS Content Delivery Chain
 
-The HLS server resolves content through a three-tier fallback:
+The HLS server serves content directly from Azure Blob Storage (proxy mode) — no Azure Files SMB mount needed for HLS content. This avoids SMB caching issues that caused `master.m3u8` and variant playlists to disappear.
 
-1. **Local mount** — Azure Files `hls-output` share mounted at `/hls-output`
+1. **Upstream proxy** — Blob Storage at `https://<storage>.blob.core.windows.net/hls-content/hls/`
 2. **Segment cache** — Cached segments from previous upstream fetches at `/segment-cache`
-3. **Upstream proxy** — Blob Storage at `https://<storage>.blob.core.windows.net/hls-content/hls/`
+3. **Dynamic master.m3u8** — If `master.m3u8` is missing from blob, the HLS server probes the upstream for variant playlists (`stream_0/index.m3u8`, etc.) and generates it dynamically
 
 > **Important**: The blob sidecar (from rtmp-go) uploads HLS content to `hls-content/hls/live_{eventId}/`. The `UPSTREAM_ORIGIN` env var must include the `/hls` path prefix to match this structure.
-
-> **Azure Files SMB caching**: Container Apps mount Azure Files via SMB (CIFS), which aggressively caches directory listings. Newly written files may not appear on the mounted filesystem for several minutes. The upstream proxy to Blob Storage mitigates this — blob storage reflects writes immediately. For live streams, the upstream proxy is the primary content source.
 
 ### ABR Manifest Structure
 
