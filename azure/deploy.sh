@@ -185,6 +185,7 @@ echo ">>> Step 6/7: Deploying container apps with built images..."
 # Use custom URLs if provided, otherwise derive from ACA FQDNs
 EFFECTIVE_HLS_BASE_URL="${HLS_SERVER_BASE_URL:-https://${HLS_FQDN}}"
 EFFECTIVE_CORS_ORIGIN="${CORS_ALLOWED_ORIGIN:-https://${PLATFORM_FQDN}}"
+EFFECTIVE_PLATFORM_APP_URL="https://${PLATFORM_FQDN}"
 
 DEPLOY_OUTPUT=$(az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
@@ -204,6 +205,7 @@ DEPLOY_OUTPUT=$(az deployment group create \
     hlsServerImage="${REGISTRY_LOGIN_SERVER}/streamgate-hls:latest" \
     hlsServerBaseUrl="$EFFECTIVE_HLS_BASE_URL" \
     corsAllowedOrigin="$EFFECTIVE_CORS_ORIGIN" \
+    platformAppUrl="$EFFECTIVE_PLATFORM_APP_URL" \
     adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
   --query 'properties.outputs' \
   --output json)

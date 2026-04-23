@@ -70,6 +70,9 @@ param corsAllowedOrigin string = ''
 @description('IP address allowed to access the admin console (empty = no restriction)')
 param adminAllowedIp string = ''
 
+@description('Platform app URL for HLS server revocation polling (set on second deploy pass)')
+param platformAppUrl string = ''
+
 // ---------- Variables ----------
 
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location, environmentName)
@@ -234,10 +237,10 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: '30000'
             }
             {
-              // PLATFORM_APP_URL is set after platform app is created via Bicep reference.
-              // Using the external FQDN since both apps have external ingress.
+              // PLATFORM_APP_URL is resolved on the second deploy pass via platformAppUrl parameter.
+              // On first pass it's a placeholder since platformApp hasn't been created yet.
               name: 'PLATFORM_APP_URL'
-              value: 'https://PLACEHOLDER'
+              value: !empty(platformAppUrl) ? platformAppUrl : 'https://PLACEHOLDER'
             }
             {
               name: 'CORS_ALLOWED_ORIGIN'
