@@ -12,8 +12,11 @@
 #   PLAYBACK_SIGNING_SECRET   — HMAC secret (auto-generated if empty)
 #   INTERNAL_API_KEY          — internal API key (auto-generated if empty)
 #   ADMIN_PASSWORD_HASH       — bcrypt hash of admin password (required)
-#   HLS_SERVER_BASE_URL       — override HLS server public URL (optional)
-#   CORS_ALLOWED_ORIGIN       — override CORS origin (optional)
+#   HLS_SERVER_BASE_URL       — override HLS server public URL (auto-detected from DNS)
+#   CORS_ALLOWED_ORIGIN       — override CORS origin (auto-detected from DNS)
+#   PLATFORM_APP_URL          — override platform app URL for HLS→Platform comms (auto-detected from DNS)
+#   DNS_RESOURCE_GROUP        — resource group for DNS zone (default: rg-dns)
+#   DNS_ZONE_NAME             — domain name (default: port-80.com)
 #   ADMIN_ALLOWED_IP          — IP allowed to access /admin (auto-detected if empty)
 #
 # Prerequisites:
@@ -155,6 +158,9 @@ HLS_FQDN=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; print(json.load(
 echo "    Infrastructure deployed."
 echo "    Platform: $PLATFORM_FQDN"
 echo "    HLS:      $HLS_FQDN"
+echo "    HLS Base URL:    $EFFECTIVE_HLS_BASE_URL"
+echo "    CORS Origin:     $EFFECTIVE_CORS_ORIGIN"
+echo "    Platform App URL: $EFFECTIVE_PLATFORM_APP_URL"
 
 # --- Step 5: Build & push Docker images using ACR Tasks ---
 echo ""
@@ -182,10 +188,56 @@ echo "    Images built and pushed."
 echo ""
 echo ">>> Step 6/7: Deploying container apps with built images..."
 
-# Use custom URLs if provided, otherwise derive from ACA FQDNs
-EFFECTIVE_HLS_BASE_URL="${HLS_SERVER_BASE_URL:-https://${HLS_FQDN}}"
-EFFECTIVE_CORS_ORIGIN="${CORS_ALLOWED_ORIGIN:-https://${PLATFORM_FQDN}}"
-EFFECTIVE_PLATFORM_APP_URL="https://${PLATFORM_FQDN}"
+# --- Auto-detect custom domains from DNS zone ---
+# If custom domain env vars are not explicitly set, check if DNS CNAME records exist.
+# This ensures redeployments after dns-deploy.sh automatically use the custom domains.
+DNS_RG="${DNS_RESOURCE_GROUP:-rg-dns}"
+DNS_ZONE="${DNS_ZONE_NAME:-port-80.com}"
+
+if [ -z "${HLS_SERVER_BASE_URL:-}" ] || [ -z "${CORS_ALLOWED_ORIGIN:-}" ] || [ -z "${PLATFORM_APP_URL:-}" ]; then
+  echo "    Checking for custom domain DNS records in $DNS_ZONE..."
+  WATCH_CNAME=$(az network dns record-set cname show \
+    --resource-group "$DNS_RG" --zone-name "$DNS_ZONE" --name "watch" \
+    --query 'cnameRecord.cname' -o tsv 2>/dev/null || echo "")
+  HLS_CNAME=$(az network dns record-set cname show \
+    --resource-group "$DNS_RG" --zone-name "$DNS_ZONE" --name "hls" \
+    --query 'cnameRecord.cname' -o tsv 2>/dev/null || echo "")
+
+  if [ -n "$WATCH_CNAME" ]; then
+    echo "    Found: watch.$DNS_ZONE → $WATCH_CNAME"
+  fi
+  if [ -n "$HLS_CNAME" ]; then
+    echo "    Found: hls.$DNS_ZONE → $HLS_CNAME"
+  fi
+fi
+
+# Resolve effective URLs: explicit override > custom domain > ACA FQDN
+if [ -n "${HLS_SERVER_BASE_URL:-}" ]; then
+  EFFECTIVE_HLS_BASE_URL="$HLS_SERVER_BASE_URL"
+elif [ -n "${HLS_CNAME:-}" ]; then
+  EFFECTIVE_HLS_BASE_URL="https://hls.$DNS_ZONE"
+  echo "    Using custom domain for HLS: $EFFECTIVE_HLS_BASE_URL"
+else
+  EFFECTIVE_HLS_BASE_URL="https://${HLS_FQDN}"
+fi
+
+if [ -n "${CORS_ALLOWED_ORIGIN:-}" ]; then
+  EFFECTIVE_CORS_ORIGIN="$CORS_ALLOWED_ORIGIN"
+elif [ -n "${WATCH_CNAME:-}" ]; then
+  EFFECTIVE_CORS_ORIGIN="https://watch.$DNS_ZONE"
+  echo "    Using custom domain for CORS: $EFFECTIVE_CORS_ORIGIN"
+else
+  EFFECTIVE_CORS_ORIGIN="https://${PLATFORM_FQDN}"
+fi
+
+if [ -n "${PLATFORM_APP_URL:-}" ]; then
+  EFFECTIVE_PLATFORM_APP_URL="$PLATFORM_APP_URL"
+elif [ -n "${WATCH_CNAME:-}" ]; then
+  EFFECTIVE_PLATFORM_APP_URL="https://watch.$DNS_ZONE"
+  echo "    Using custom domain for Platform URL: $EFFECTIVE_PLATFORM_APP_URL"
+else
+  EFFECTIVE_PLATFORM_APP_URL="https://${PLATFORM_FQDN}"
+fi
 
 # Generate a read-only SAS token for upstream blob proxy (1-year expiry)
 echo "    Generating SAS token for hls-content blob access..."
@@ -254,6 +306,9 @@ echo "  https://${HLS_FQDN}"
 echo ""
 echo "Admin Console:"
 echo "  https://${PLATFORM_FQDN}/admin"
+if [ "$EFFECTIVE_CORS_ORIGIN" != "https://${PLATFORM_FQDN}" ]; then
+  echo "  (Custom domain: ${EFFECTIVE_CORS_ORIGIN}/admin)"
+fi
 echo ""
 echo "Health Check:"
 echo "  curl https://${HLS_FQDN}/health"
@@ -273,14 +328,29 @@ echo "  3. Tell broadcaster to publish:"
 echo "     ffmpeg -re -i video.mp4 -c copy -f flv \\"
 echo "       \"rtmp://stream.port-80.com/live/{EVENT_UUID}?token=<rtmp-shared-token>\""
 echo "  4. Generate tickets in admin → distribute to viewers"
-echo "  5. Viewers visit https://${PLATFORM_FQDN} → enter ticket → watch"
+if [ -n "${WATCH_CNAME:-}" ]; then
+  echo "  5. Viewers visit https://watch.$DNS_ZONE → enter ticket → watch"
+else
+  echo "  5. Viewers visit https://${PLATFORM_FQDN} → enter ticket → watch"
+fi
 echo ""
 echo "--------------------------------------------"
-echo "  DNS Setup (optional — custom domains)"
+echo "  Custom Domains"
 echo "--------------------------------------------"
-echo "  PLATFORM_APP_FQDN=\"${PLATFORM_FQDN}\" \\"
-echo "  HLS_SERVER_FQDN=\"${HLS_FQDN}\" \\"
-echo "  ./dns-deploy.sh"
+if [ -n "${WATCH_CNAME:-}" ] || [ -n "${HLS_CNAME:-}" ]; then
+  echo "  Custom domains active (auto-detected from DNS):"
+  [ -n "${WATCH_CNAME:-}" ] && echo "    Platform: https://watch.$DNS_ZONE"
+  [ -n "${HLS_CNAME:-}" ] && echo "    HLS:      https://hls.$DNS_ZONE"
+  echo "  HLS Base URL:    $EFFECTIVE_HLS_BASE_URL"
+  echo "  CORS Origin:     $EFFECTIVE_CORS_ORIGIN"
+  echo "  Platform App URL: $EFFECTIVE_PLATFORM_APP_URL"
+else
+  echo "  No custom domains detected. To set up:"
+  echo "  PLATFORM_APP_FQDN=\"${PLATFORM_FQDN}\" \\"
+  echo "  HLS_SERVER_FQDN=\"${HLS_FQDN}\" \\"
+  echo "  ./dns-deploy.sh"
+  echo "  Then redeploy: ./deploy.sh (domains will be auto-detected)"
+fi
 echo ""
 echo "Azure Portal:"
 echo "  https://portal.azure.com/#@/resource/subscriptions/${SUBSCRIPTION}/resourceGroups/${RESOURCE_GROUP}/overview"

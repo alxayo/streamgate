@@ -119,6 +119,8 @@ docker run -p 4000:4000 \
   streaming-hls
 ```
 
+> **Important**: `CORS_ALLOWED_ORIGIN` and `PLATFORM_APP_URL` must match the **public URL** that viewers use to access the platform — not an internal FQDN. If you use a custom domain (e.g., `watch.example.com`), set `CORS_ALLOWED_ORIGIN=https://watch.example.com` and `PLATFORM_APP_URL=https://watch.example.com`. Similarly, `HLS_SERVER_BASE_URL` in the platform must point to the HLS server's **public URL** (e.g., `https://hls.example.com`).
+
 ## Database Migration (SQLite → PostgreSQL)
 
 1. Update `platform/prisma/schema.prisma`:

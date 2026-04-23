@@ -176,11 +176,17 @@ This creates:
 - `watch.port-80.com` → Platform App
 - `hls.port-80.com` → HLS Server
 
-After DNS propagates, redeploy with the custom domain URLs:
+**Custom domains are auto-detected on subsequent deployments.** Once `dns-deploy.sh` has created the CNAME records, running `./deploy.sh` will automatically:
+- Set `HLS_SERVER_BASE_URL` to `https://hls.port-80.com`
+- Set `CORS_ALLOWED_ORIGIN` to `https://watch.port-80.com`
+- Set `PLATFORM_APP_URL` to `https://watch.port-80.com`
+
+No need to pass extra environment variables. To override the auto-detected values, set them explicitly:
 
 ```bash
 HLS_SERVER_BASE_URL="https://hls.port-80.com" \
 CORS_ALLOWED_ORIGIN="https://watch.port-80.com" \
+PLATFORM_APP_URL="https://watch.port-80.com" \
 ADMIN_PASSWORD_HASH='$2b$12$...' \
 PLAYBACK_SIGNING_SECRET="..." \
 INTERNAL_API_KEY="..." \
@@ -198,8 +204,11 @@ INTERNAL_API_KEY="..." \
 | `PLAYBACK_SIGNING_SECRET` | (auto-generated) | HMAC secret for JWT playback tokens |
 | `INTERNAL_API_KEY` | (auto-generated) | API key for internal revocation sync |
 | `ADMIN_PASSWORD_HASH` | (required) | Bcrypt hash of admin password |
-| `HLS_SERVER_BASE_URL` | (auto: ACA FQDN) | Public URL of HLS server (override after DNS setup) |
-| `CORS_ALLOWED_ORIGIN` | (auto: ACA FQDN) | CORS origin for HLS server |
+| `HLS_SERVER_BASE_URL` | (auto: custom domain or ACA FQDN) | Public URL of HLS server (auto-detected from DNS zone) |
+| `CORS_ALLOWED_ORIGIN` | (auto: custom domain or ACA FQDN) | CORS origin for HLS server (auto-detected from DNS zone) |
+| `PLATFORM_APP_URL` | (auto: custom domain or ACA FQDN) | Platform URL for HLS→Platform revocation sync (auto-detected from DNS zone) |
+| `DNS_RESOURCE_GROUP` | `rg-dns` | Resource group containing the DNS zone (for auto-detection) |
+| `DNS_ZONE_NAME` | `port-80.com` | Domain name for custom domain auto-detection |
 | `ADMIN_ALLOWED_IP` | (auto-detected) | IP address allowed to access `/admin`. Auto-detected via ifconfig.me if empty. Set to empty string to disable restriction. |
 
 ### dns-deploy.sh
@@ -260,7 +269,7 @@ az containerapp logs show -n <app-name> -g rg-rtmpgo --type console
 ```
 
 ### CORS errors in browser
-Verify `CORS_ALLOWED_ORIGIN` matches the platform app's public URL exactly (including protocol). After DNS setup, redeploy with `CORS_ALLOWED_ORIGIN=https://watch.port-80.com`.
+Verify `CORS_ALLOWED_ORIGIN` matches the platform app's public URL exactly (including protocol). If custom domains are set up via `dns-deploy.sh`, running `./deploy.sh` auto-detects them. Otherwise, override explicitly with `CORS_ALLOWED_ORIGIN=https://watch.port-80.com ./deploy.sh`.
 
 ### Player loads but no video / "Stream source unavailable"
 Verify the full content delivery chain:

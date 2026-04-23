@@ -108,9 +108,13 @@ if [ -n "$HLS_SERVER_FQDN" ]; then
 fi
 
 echo ""
-echo "NOTE: After DNS is active, redeploy StreamGate with custom domain URLs:"
+echo "NOTE: Custom domains will be auto-detected on next deployment."
+echo "  Just run: ./deploy.sh"
+echo ""
+echo "  Or override explicitly:"
 echo "  HLS_SERVER_BASE_URL=\"https://$HLS_DOMAIN\" \\"
 echo "  CORS_ALLOWED_ORIGIN=\"https://$PLATFORM_DOMAIN\" \\"
+echo "  PLATFORM_APP_URL=\"https://$PLATFORM_DOMAIN\" \\"
 echo "  ./deploy.sh"
 echo ""
 echo "To remove these DNS records: ./dns-destroy.sh"
