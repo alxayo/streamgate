@@ -158,9 +158,6 @@ HLS_FQDN=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; print(json.load(
 echo "    Infrastructure deployed."
 echo "    Platform: $PLATFORM_FQDN"
 echo "    HLS:      $HLS_FQDN"
-echo "    HLS Base URL:    $EFFECTIVE_HLS_BASE_URL"
-echo "    CORS Origin:     $EFFECTIVE_CORS_ORIGIN"
-echo "    Platform App URL: $EFFECTIVE_PLATFORM_APP_URL"
 
 # --- Step 5: Build & push Docker images using ACR Tasks ---
 echo ""
@@ -198,10 +195,10 @@ if [ -z "${HLS_SERVER_BASE_URL:-}" ] || [ -z "${CORS_ALLOWED_ORIGIN:-}" ] || [ -
   echo "    Checking for custom domain DNS records in $DNS_ZONE..."
   WATCH_CNAME=$(az network dns record-set cname show \
     --resource-group "$DNS_RG" --zone-name "$DNS_ZONE" --name "watch" \
-    --query 'cnameRecord.cname' -o tsv 2>/dev/null || echo "")
+    --query 'CNAMERecord.cname' -o tsv 2>/dev/null || echo "")
   HLS_CNAME=$(az network dns record-set cname show \
     --resource-group "$DNS_RG" --zone-name "$DNS_ZONE" --name "hls" \
-    --query 'cnameRecord.cname' -o tsv 2>/dev/null || echo "")
+    --query 'CNAMERecord.cname' -o tsv 2>/dev/null || echo "")
 
   if [ -n "$WATCH_CNAME" ]; then
     echo "    Found: watch.$DNS_ZONE → $WATCH_CNAME"
@@ -278,6 +275,40 @@ PLATFORM_APP_NAME=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; print(j
 HLS_APP_NAME=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['hlsServerAppName']['value'])")
 PLATFORM_FQDN=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['platformAppFqdn']['value'])")
 HLS_FQDN=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['hlsServerFqdn']['value'])")
+
+# --- Bind custom domains (after Bicep, via CLI) ---
+if [ -n "${WATCH_CNAME:-}" ]; then
+  echo "    Binding custom domain watch.$DNS_ZONE to $PLATFORM_APP_NAME..."
+  # Check if already bound
+  EXISTING_WATCH=$(az containerapp hostname list -g "$RESOURCE_GROUP" -n "$PLATFORM_APP_NAME" \
+    --query "[?name=='watch.$DNS_ZONE'].name" -o tsv 2>/dev/null || echo "")
+  if [ -z "$EXISTING_WATCH" ]; then
+    az containerapp hostname add -g "$RESOURCE_GROUP" -n "$PLATFORM_APP_NAME" \
+      --hostname "watch.$DNS_ZONE" --output none 2>/dev/null
+    az containerapp hostname bind -g "$RESOURCE_GROUP" -n "$PLATFORM_APP_NAME" \
+      --hostname "watch.$DNS_ZONE" --environment "$CONTAINER_ENV_NAME" \
+      --validation-method CNAME --output none 2>/dev/null
+    echo "    ✓ watch.$DNS_ZONE bound with managed certificate"
+  else
+    echo "    watch.$DNS_ZONE already bound"
+  fi
+fi
+
+if [ -n "${HLS_CNAME:-}" ]; then
+  echo "    Binding custom domain hls.$DNS_ZONE to $HLS_APP_NAME..."
+  EXISTING_HLS=$(az containerapp hostname list -g "$RESOURCE_GROUP" -n "$HLS_APP_NAME" \
+    --query "[?name=='hls.$DNS_ZONE'].name" -o tsv 2>/dev/null || echo "")
+  if [ -z "$EXISTING_HLS" ]; then
+    az containerapp hostname add -g "$RESOURCE_GROUP" -n "$HLS_APP_NAME" \
+      --hostname "hls.$DNS_ZONE" --output none 2>/dev/null
+    az containerapp hostname bind -g "$RESOURCE_GROUP" -n "$HLS_APP_NAME" \
+      --hostname "hls.$DNS_ZONE" --environment "$CONTAINER_ENV_NAME" \
+      --validation-method CNAME --output none 2>/dev/null
+    echo "    ✓ hls.$DNS_ZONE bound with managed certificate"
+  else
+    echo "    hls.$DNS_ZONE already bound"
+  fi
+fi
 
 # --- Step 7: Verify ---
 echo ""
