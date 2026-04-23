@@ -9,7 +9,11 @@ export class UpstreamProxy {
    */
   buildUpstreamUrl(eventId: string, filename: string): string {
     const dirName = this.config.streamKeyPrefix + eventId;
-    return `${this.config.upstreamOrigin}/${dirName}/${filename}`;
+    const baseUrl = `${this.config.upstreamOrigin}/${dirName}/${filename}`;
+    if (this.config.upstreamSasToken) {
+      return `${baseUrl}?${this.config.upstreamSasToken}`;
+    }
+    return baseUrl;
   }
 
   /**

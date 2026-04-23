@@ -73,6 +73,10 @@ param adminAllowedIp string = ''
 @description('Platform app URL for HLS server revocation polling (set on second deploy pass)')
 param platformAppUrl string = ''
 
+@description('SAS token for read-only access to hls-content blob container (set on second deploy pass)')
+@secure()
+param upstreamSasToken string = ''
+
 // ---------- Variables ----------
 
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location, environmentName)
@@ -184,6 +188,12 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'internal-api-key'
           value: internalApiKey
         }
+        ...(!empty(upstreamSasToken) ? [
+          {
+            name: 'upstream-sas-token'
+            value: upstreamSasToken
+          }
+        ] : [])
       ]
     }
     template: {
@@ -216,6 +226,12 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'UPSTREAM_ORIGIN'
               value: 'https://${storageAccountName}.blob.core.windows.net/hls-content/hls'
             }
+            ...(!empty(upstreamSasToken) ? [
+              {
+                name: 'UPSTREAM_SAS_TOKEN'
+                secretRef: 'upstream-sas-token'
+              }
+            ] : [])
             {
               name: 'STREAM_KEY_PREFIX'
               value: 'live_'

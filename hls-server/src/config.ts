@@ -22,6 +22,7 @@ export function loadConfig() {
     internalApiKey: requireEnv('INTERNAL_API_KEY'),
     streamRoot,
     upstreamOrigin,
+    upstreamSasToken: process.env.UPSTREAM_SAS_TOKEN || null,
     segmentCacheRoot: process.env.SEGMENT_CACHE_ROOT || (streamRoot ? `${streamRoot}/cache` : null),
     segmentCacheMaxSizeGb: parseFloat(process.env.SEGMENT_CACHE_MAX_SIZE_GB || '50'),
     segmentCacheMaxAgeHours: parseInt(process.env.SEGMENT_CACHE_MAX_AGE_HOURS || '72', 10),

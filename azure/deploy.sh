@@ -187,6 +187,17 @@ EFFECTIVE_HLS_BASE_URL="${HLS_SERVER_BASE_URL:-https://${HLS_FQDN}}"
 EFFECTIVE_CORS_ORIGIN="${CORS_ALLOWED_ORIGIN:-https://${PLATFORM_FQDN}}"
 EFFECTIVE_PLATFORM_APP_URL="https://${PLATFORM_FQDN}"
 
+# Generate a read-only SAS token for upstream blob proxy (1-year expiry)
+echo "    Generating SAS token for hls-content blob access..."
+UPSTREAM_SAS_TOKEN=$(az storage container generate-sas \
+  --account-name "$STORAGE_ACCOUNT" \
+  --name hls-content \
+  --permissions rl \
+  --expiry "$(date -u -v+1y '+%Y-%m-%dT%H:%MZ' 2>/dev/null || date -u -d '+1 year' '+%Y-%m-%dT%H:%MZ')" \
+  --https-only \
+  -o tsv)
+echo "    SAS token generated (expires in 1 year)."
+
 DEPLOY_OUTPUT=$(az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
   --name "streamgate" \
@@ -206,6 +217,7 @@ DEPLOY_OUTPUT=$(az deployment group create \
     hlsServerBaseUrl="$EFFECTIVE_HLS_BASE_URL" \
     corsAllowedOrigin="$EFFECTIVE_CORS_ORIGIN" \
     platformAppUrl="$EFFECTIVE_PLATFORM_APP_URL" \
+    upstreamSasToken="$UPSTREAM_SAS_TOKEN" \
     adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
   --query 'properties.outputs' \
   --output json)
