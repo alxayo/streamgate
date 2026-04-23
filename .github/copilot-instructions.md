@@ -66,6 +66,7 @@ npm run lint                    # ESLint + Prettier
 - Public endpoints: `/api/tokens/validate`, `/api/playback/refresh`, `/api/playback/heartbeat`, `/api/playback/release`, `/api/events/:id/status`
 - Admin endpoints: `/api/admin/*` — require session cookie auth
 - Internal endpoint: `/api/revocations` — require `X-Internal-Api-Key` header
+- RTMP callback: `/api/rtmp/auth` — POST, validates `RTMP_AUTH_TOKEN` from body + event UUID for publish actions
 - Return JSON with consistent shape: `{ data }` on success, `{ error: string }` on failure
 - Use proper HTTP status codes: 401 (invalid token), 403 (revoked), 409 (token in use), 410 (expired), 429 (rate limited)
 
@@ -107,6 +108,7 @@ Platform App:
 - `ADMIN_PASSWORD_HASH`, `PLAYBACK_SIGNING_SECRET`, `INTERNAL_API_KEY`
 - `DATABASE_URL`, `HLS_SERVER_BASE_URL`, `NEXT_PUBLIC_APP_NAME`
 - `SESSION_TIMEOUT_SECONDS` (default: 60, how long before an inactive session is considered abandoned)
+- `RTMP_AUTH_TOKEN` (shared secret for RTMP callback auth — validates ingest publish requests)
 
 HLS Media Server:
 - `PLAYBACK_SIGNING_SECRET` (must match Platform App)

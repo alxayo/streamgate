@@ -117,16 +117,32 @@ The deploy script auto-generates `PLAYBACK_SIGNING_SECRET` and `INTERNAL_API_KEY
 | `INTERNAL_API_KEY` | Authenticates revocation sync between HLS → Platform | `openssl rand -base64 24` |
 | `ADMIN_PASSWORD_HASH` | Bcrypt hash of the admin password | `npm run hash-password` |
 
-## RTMP Auth Token
+## RTMP Auth Integration
 
-rtmp-go uses a **single shared auth token** for all streams under the `live/` app prefix. This token was configured during rtmp-go deployment. Every broadcaster uses it regardless of which event UUID they publish to.
+rtmp-go uses **callback auth mode** to validate publish requests against the StreamGate platform. On every RTMP `publish` or `play` action, the RTMP server sends a POST request to StreamGate's `/api/rtmp/auth` endpoint with:
+
+```json
+{ "action": "publish", "app": "live", "stream_name": "{EVENT_UUID}", "token": "<RTMP_AUTH_TOKEN>", "remote_addr": "..." }
+```
+
+The callback endpoint validates:
+1. **Token** — `RTMP_AUTH_TOKEN` env var matches the token in the request body
+2. **Event UUID** — For `publish` actions, verifies the `stream_name` is an existing active event in the database
+3. **Play requests** — Allowed with a valid token (no event check needed)
+
+Returns HTTP 200 to allow, 403 to deny.
+
+**RTMP server flags:**
+```
+-auth-mode callback -auth-callback https://<platform-fqdn>/api/rtmp/auth
+```
 
 **Broadcaster publishes to:**
 ```
-rtmp://stream.port-80.com/live/{EVENT_UUID}?token=<rtmp-shared-token>
+rtmp://stream.port-80.com/live/{EVENT_UUID}?token=<RTMP_AUTH_TOKEN>
 ```
 
-The `{EVENT_UUID}` is the event ID from StreamGate's admin console. The `<rtmp-shared-token>` is the secret portion of the RTMP auth token (the value after `=` in the `-auth-token live/stream=secret` flag).
+The `{EVENT_UUID}` is the event ID from StreamGate's admin console. The `<RTMP_AUTH_TOKEN>` is the shared secret configured in both the RTMP server (`-auth-token`) and StreamGate platform (`RTMP_AUTH_TOKEN` env var).
 
 > **Path mapping**: rtmp-go's HLS transcoder sanitizes stream keys by replacing `/` with `_`, so `live/{uuid}` produces output at `/hls-output/live_{uuid}/`. StreamGate's HLS server uses `STREAM_KEY_PREFIX=live_` to bridge this convention gap transparently.
 
@@ -136,13 +152,14 @@ The `{EVENT_UUID}` is the event ID from StreamGate's admin console. The `<rtmp-s
 2. **Create an event** — set title, schedule, stream type (LIVE). Note the **event UUID** displayed
 3. **Tell the broadcaster** to publish to:
    ```
-   rtmp://stream.port-80.com/live/{EVENT_UUID}?token=<rtmp-shared-token>
+   rtmp://stream.port-80.com/live/{EVENT_UUID}?token=<RTMP_AUTH_TOKEN>
    ```
    Or with ffmpeg:
    ```bash
    ffmpeg -re -i video.mp4 -c copy -f flv \
-     "rtmp://stream.port-80.com/live/{EVENT_UUID}?token=<rtmp-shared-token>"
+     "rtmp://stream.port-80.com/live/{EVENT_UUID}?token=<RTMP_AUTH_TOKEN>"
    ```
+   The callback validates that the event UUID exists and is active — deactivated events are rejected.
 4. **Generate tickets** in the admin console for the event
 5. **Distribute ticket codes** to viewers (12-character alphanumeric codes)
 6. **Viewers** visit `https://<platform-fqdn>` → enter ticket code → watch the multi-bitrate HLS stream
