@@ -156,6 +156,10 @@ resource segmentCacheStorage 'Microsoft.App/managedEnvironments/storages@2024-03
 resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: hlsAppName
   location: location
+  tags: {
+    role: 'hls-server'
+    component: 'streamgate'
+  }
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -287,6 +291,10 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
 resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: platformAppName
   location: location
+  tags: {
+    role: 'platform'
+    component: 'streamgate'
+  }
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
