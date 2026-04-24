@@ -44,4 +44,37 @@ export class UpstreamProxy {
       etag: response.headers.get('etag') || undefined,
     };
   }
+
+  /**
+   * Fetch a segment from upstream with retry on 404.
+   * Live HLS segments may appear in the playlist before the blob sidecar
+   * has finished uploading them to storage. Retrying with a short delay
+   * bridges this race window without client-visible errors.
+   */
+  async fetchWithRetry(
+    eventId: string,
+    filename: string,
+    maxRetries = 3,
+    retryDelayMs = 500,
+  ): Promise<{
+    data: Buffer;
+    contentType: string;
+    lastModified?: string;
+    etag?: string;
+  }> {
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.fetch(eventId, filename);
+      } catch (error) {
+        lastError = error as Error;
+        const is404 = lastError.message.includes('404');
+        if (!is404 || attempt === maxRetries) {
+          throw lastError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+    throw lastError;
+  }
 }

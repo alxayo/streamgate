@@ -231,9 +231,9 @@ export function createStreamRoutes(
             return;
           }
 
-          // Segment: use inflight dedup
+          // Segment: use inflight dedup with upstream retry for live race
           const data = await inflightDedup.getOrFetch(cacheKey, async () => {
-            const upstream = await upstreamProxy.fetch(eventId, filename);
+            const upstream = await upstreamProxy.fetchWithRetry(eventId, filename);
             // Persist to cache
             await segmentCache.write(eventId, filename, upstream.data);
             return upstream.data;
