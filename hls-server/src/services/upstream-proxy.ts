@@ -54,8 +54,8 @@ export class UpstreamProxy {
   async fetchWithRetry(
     eventId: string,
     filename: string,
-    maxRetries = 3,
-    retryDelayMs = 500,
+    maxRetries = 4,
+    retryDelayMs = 800,
   ): Promise<{
     data: Buffer;
     contentType: string;
