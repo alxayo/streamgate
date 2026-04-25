@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { UpstreamProxy } from '../services/upstream-proxy.js';
 import type { ServerConfig } from '../config.js';
+import { asyncHandler } from '../middleware/error-handler.js';
 
 const ABR_RENDITIONS = [
   { dir: 'stream_0', bandwidth: 5192000, resolution: '1920x1080' },
@@ -74,7 +75,7 @@ export function createAdminFinalizeRoute(
 ) {
   const router = Router();
 
-  router.post('/admin/finalize/:eventId', async (req: Request, res: Response) => {
+  router.post('/admin/finalize/:eventId', asyncHandler(async (req: Request, res: Response) => {
     const apiKey = req.headers['x-internal-api-key'];
     if (apiKey !== config.internalApiKey) {
       res.status(401).json({ error: 'Unauthorized' });
@@ -193,7 +194,7 @@ export function createAdminFinalizeRoute(
       console.error(`Failed to finalize event ${eventId}:`, error);
       res.status(500).json({ error: 'Failed to finalize event as VOD' });
     }
-  });
+  }));
 
   return router;
 }

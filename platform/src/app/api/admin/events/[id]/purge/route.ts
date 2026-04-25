@@ -32,7 +32,9 @@ export async function POST(
       );
     }
 
-    const result = await response.json();
+    // Handle empty body (e.g. 204 No Content)
+    const text = await response.text();
+    const result = text ? JSON.parse(text) : { deletedCache: true };
     return NextResponse.json({ data: result });
   } catch (error) {
     console.error(`Purge failed for event ${id}:`, error);

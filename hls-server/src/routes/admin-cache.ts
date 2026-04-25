@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import type { SegmentCache } from '../services/segment-cache.js';
 import type { UpstreamProxy } from '../services/upstream-proxy.js';
 import type { ServerConfig } from '../config.js';
+import { asyncHandler } from '../middleware/error-handler.js';
 
 export function createAdminCacheRoute(
   segmentCache: SegmentCache,
@@ -11,7 +12,7 @@ export function createAdminCacheRoute(
 ) {
   const router = Router();
 
-  router.delete('/admin/cache/:eventId', async (req: Request, res: Response) => {
+  router.delete('/admin/cache/:eventId', asyncHandler(async (req: Request, res: Response) => {
     const apiKey = req.headers['x-internal-api-key'];
     if (apiKey !== config.internalApiKey) {
       res.status(401).json({ error: 'Unauthorized' });
@@ -48,7 +49,7 @@ export function createAdminCacheRoute(
       console.error(`Failed to purge event ${eventId}:`, error);
       res.status(500).json({ error: 'Failed to purge event data' });
     }
-  });
+  }));
 
   return router;
 }

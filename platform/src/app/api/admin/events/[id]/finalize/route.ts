@@ -39,7 +39,9 @@ export async function POST(
       );
     }
 
-    const result = await response.json();
+    // Handle empty body (e.g. 204 No Content)
+    const text = await response.text();
+    const result = text ? JSON.parse(text) : { finalized: true };
 
     // Update the event to VOD in the database
     await prisma.event.update({
