@@ -16,6 +16,7 @@ import { createErrorHandler } from './middleware/error-handler.js';
 import { createStreamRoutes } from './routes/streams.js';
 import { createHealthRoute } from './routes/health.js';
 import { createAdminCacheRoute } from './routes/admin-cache.js';
+import { createAdminFinalizeRoute } from './routes/admin-finalize.js';
 
 const config = loadConfig();
 const app = express();
@@ -38,7 +39,8 @@ app.use(createRequestLogger());
 app.use(createHealthRoute(revocationCache, syncService, segmentCache));
 
 // Routes (API key auth)
-app.use(createAdminCacheRoute(segmentCache, config));
+app.use(createAdminCacheRoute(segmentCache, upstreamProxy, config));
+app.use(createAdminFinalizeRoute(upstreamProxy, config));
 
 // Routes (JWT auth)
 const jwtAuth = createJwtAuthMiddleware(jwtVerifier, revocationCache);
