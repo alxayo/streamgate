@@ -81,6 +81,10 @@ param platformAppUrl string = ''
 @secure()
 param upstreamSasToken string = ''
 
+@description('SAS token for write/delete access to hls-content blob container (admin operations: purge, finalize)')
+@secure()
+param upstreamAdminSasToken string = ''
+
 // ---------- Variables ----------
 
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location, environmentName)
@@ -196,6 +200,12 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
             value: upstreamSasToken
           }
         ] : [])
+        ...(!empty(upstreamAdminSasToken) ? [
+          {
+            name: 'upstream-admin-sas-token'
+            value: upstreamAdminSasToken
+          }
+        ] : [])
       ]
     }
     template: {
@@ -228,6 +238,12 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
               {
                 name: 'UPSTREAM_SAS_TOKEN'
                 secretRef: 'upstream-sas-token'
+              }
+            ] : [])
+            ...(!empty(upstreamAdminSasToken) ? [
+              {
+                name: 'UPSTREAM_ADMIN_SAS_TOKEN'
+                secretRef: 'upstream-admin-sas-token'
               }
             ] : [])
             {
