@@ -78,6 +78,8 @@ export function PlayerScreen({ data, code, onBack }: PlayerScreenProps) {
     (errorType: 'auth' | 'network') => {
       if (errorType === 'auth') {
         setEndedMessage('Your access has been revoked');
+      } else if (errorType === 'network') {
+        setEndedMessage('Unable to load stream. The stream may no longer be available.');
       }
     },
     [],

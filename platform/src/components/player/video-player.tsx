@@ -60,6 +60,7 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: Vide
   const [qualityLevels, setQualityLevels] = useState<QualityLevel[]>([]);
   const [currentQuality, setCurrentQuality] = useState(-1);
   const [autoQuality, setAutoQuality] = useState(true);
+  const fatalErrorCount = useRef(0);
 
   // Initialize player
   useEffect(() => {
@@ -100,8 +101,13 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: Vide
             hls.destroy();
             onStreamError?.('auth');
           } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            hls.startLoad();
-            onStreamError?.('network');
+            fatalErrorCount.current++;
+            if (fatalErrorCount.current >= 3) {
+              hls.destroy();
+              onStreamError?.('network');
+            } else {
+              hls.startLoad();
+            }
           } else {
             hls.destroy();
             onStreamError?.('network');

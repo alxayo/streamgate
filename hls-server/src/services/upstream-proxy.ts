@@ -135,24 +135,33 @@ export class UpstreamProxy {
    * Returns the number of deleted blobs.
    */
   async deleteUpstreamBlobs(eventId: string): Promise<number> {
-    const blobs = await this.listBlobs(eventId);
-    if (blobs.length === 0) return 0;
+    let totalDeleted = 0;
+    const maxPasses = 3;
 
-    let deleted = 0;
-    for (const blobName of blobs) {
-      const url = this.buildAdminUrl(blobName);
-      try {
-        const response = await fetch(url, { method: 'DELETE' });
-        if (response.ok || response.status === 404) {
-          deleted++;
-        } else {
-          console.error(`Failed to delete blob ${blobName}: ${response.status}`);
+    for (let pass = 0; pass < maxPasses; pass++) {
+      const blobs = await this.listBlobs(eventId);
+      if (blobs.length === 0) break;
+
+      for (const blobName of blobs) {
+        const url = this.buildAdminUrl(blobName);
+        try {
+          const response = await fetch(url, { method: 'DELETE' });
+          if (response.ok || response.status === 404) {
+            totalDeleted++;
+          } else {
+            console.error(`Failed to delete blob ${blobName}: ${response.status}`);
+          }
+        } catch (error) {
+          console.error(`Failed to delete blob ${blobName}:`, error);
         }
-      } catch (error) {
-        console.error(`Failed to delete blob ${blobName}:`, error);
+      }
+
+      if (pass < maxPasses - 1) {
+        // Brief pause before re-listing to allow eventual consistency
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
-    return deleted;
+    return totalDeleted;
   }
 
   /**
