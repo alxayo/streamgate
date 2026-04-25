@@ -186,13 +186,20 @@ export function createAdminFinalizeRoute(
         'application/vnd.apple.mpegurl',
       );
 
-      res.status(200).json({
+      const body = JSON.stringify({
         finalized: true,
         variants: variants.map((v) => ({ dir: v.dir, segments: v.segmentCount })),
       });
+      console.log(`[admin-finalize] Sending 200 response for ${eventId}: ${body}, headersSent=${res.headersSent}`);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+      res.end(body);
     } catch (error) {
       console.error(`Failed to finalize event ${eventId}:`, error);
-      res.status(500).json({ error: 'Failed to finalize event as VOD' });
+      if (!res.headersSent) {
+        const errBody = JSON.stringify({ error: 'Failed to finalize event as VOD' });
+        res.writeHead(500, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(errBody) });
+        res.end(errBody);
+      }
     }
   }));
 

@@ -20,10 +20,12 @@ export function createAdminCacheRoute(
     }
 
     const eventId = req.params.eventId as string;
+    console.log(`[admin-cache] Purge started for event ${eventId}`);
 
     try {
       // 1. Clear local segment cache (Azure Files or local disk)
       await segmentCache.clearEvent(eventId);
+      console.log(`[admin-cache] Cleared segment cache for ${eventId}`);
 
       // 2. Clear local stream root files if in local/hybrid mode
       if (config.streamRoot) {
@@ -32,6 +34,7 @@ export function createAdminCacheRoute(
         const dirName = config.streamKeyPrefix + eventId;
         const eventDir = path.join(config.streamRoot, dirName);
         await fs.rm(eventDir, { recursive: true, force: true }).catch(() => {});
+        console.log(`[admin-cache] Cleared stream root for ${eventId}`);
       }
 
       // 3. Delete upstream blobs if proxy is configured
@@ -39,15 +42,23 @@ export function createAdminCacheRoute(
       if (upstreamProxy) {
         try {
           deletedBlobs = await upstreamProxy.deleteUpstreamBlobs(eventId);
+          console.log(`[admin-cache] Deleted ${deletedBlobs} upstream blobs for ${eventId}`);
         } catch (error) {
           console.error(`Failed to delete upstream blobs for ${eventId}:`, error);
         }
       }
 
-      res.status(200).json({ deletedCache: true, deletedBlobs });
+      const body = JSON.stringify({ deletedCache: true, deletedBlobs });
+      console.log(`[admin-cache] Sending 200 response for ${eventId}: ${body}, headersSent=${res.headersSent}`);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+      res.end(body);
     } catch (error) {
       console.error(`Failed to purge event ${eventId}:`, error);
-      res.status(500).json({ error: 'Failed to purge event data' });
+      if (!res.headersSent) {
+        const errBody = JSON.stringify({ error: 'Failed to purge event data' });
+        res.writeHead(500, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(errBody) });
+        res.end(errBody);
+      }
     }
   }));
 
