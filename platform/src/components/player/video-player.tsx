@@ -74,6 +74,7 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: Vide
         },
         enableWorker: true,
         lowLatencyMode: isLive,
+        ...(isLive && { liveMaxLatencyDurationCount: 6 }),
       });
 
       hls.loadSource(streamUrl);
