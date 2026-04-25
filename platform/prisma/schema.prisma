@@ -19,6 +19,7 @@ model Event {
   accessWindowHours Int      @default(48)
   isActive          Boolean  @default(true)
   isArchived        Boolean  @default(false)
+  autoPurge         Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

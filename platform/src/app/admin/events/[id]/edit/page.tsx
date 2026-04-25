@@ -17,6 +17,7 @@ export default function EditEventPage() {
     startsAt: string;
     endsAt: string;
     accessWindowHours: number;
+    autoPurge: boolean;
   }>(null);
 
   useEffect(() => {

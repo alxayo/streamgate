@@ -25,6 +25,7 @@ interface EventFormProps {
     startsAt: string;
     endsAt: string;
     accessWindowHours: number;
+    autoPurge: boolean;
   };
 }
 
@@ -41,6 +42,7 @@ export function EventForm({ initialData }: EventFormProps) {
     startsAt: initialData?.startsAt ? new Date(initialData.startsAt).toISOString().slice(0, 16) : '',
     endsAt: initialData?.endsAt ? new Date(initialData.endsAt).toISOString().slice(0, 16) : '',
     accessWindowHours: initialData?.accessWindowHours || 48,
+    autoPurge: initialData?.autoPurge ?? true,
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -65,6 +67,7 @@ export function EventForm({ initialData }: EventFormProps) {
           streamType: formData.streamType,
           streamUrl: formData.streamUrl || null,
           posterUrl: formData.posterUrl || null,
+          autoPurge: formData.autoPurge,
         }),
       });
 
@@ -106,6 +109,24 @@ export function EventForm({ initialData }: EventFormProps) {
           </SelectContent>
         </Select>
       </div>
+
+      {formData.streamType === 'LIVE' && (
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="autoPurge"
+            checked={formData.autoPurge}
+            onChange={(e) => setFormData({ ...formData, autoPurge: e.target.checked })}
+            className="h-4 w-4 rounded border-gray-300 text-accent-blue focus:ring-accent-blue"
+          />
+          <Label htmlFor="autoPurge" className="text-gray-700 cursor-pointer">
+            Auto-purge on publish
+          </Label>
+          <p className="text-xs text-gray-500">
+            Automatically clear stale segments when a new stream starts
+          </p>
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label className="text-gray-700">Description</Label>

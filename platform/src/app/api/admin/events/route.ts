@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/events — Create a new event
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours } = body;
+  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours, autoPurge } = body;
 
   // Validation
   if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -126,6 +126,7 @@ export async function POST(request: NextRequest) {
       startsAt: startDate,
       endsAt: endDate,
       accessWindowHours: windowHours,
+      autoPurge: typeof autoPurge === 'boolean' ? autoPurge : true,
     },
   });
 

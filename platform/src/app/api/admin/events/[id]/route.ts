@@ -72,7 +72,7 @@ export async function PUT(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours } = body;
+  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours, autoPurge } = body;
 
   const existing = await prisma.event.findUnique({ where: { id } });
   if (!existing) {
@@ -117,6 +117,7 @@ export async function PUT(
       ...(validStreamType !== undefined && { streamType: validStreamType }),
       ...(streamUrl !== undefined && { streamUrl: streamUrl || null }),
       ...(posterUrl !== undefined && { posterUrl: posterUrl || null }),
+      ...(typeof autoPurge === 'boolean' && { autoPurge }),
       startsAt: startDate,
       endsAt: endDate,
       accessWindowHours: windowHours,
