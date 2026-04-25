@@ -247,6 +247,17 @@ UPSTREAM_SAS_TOKEN=$(az storage container generate-sas \
   -o tsv)
 echo "    SAS token generated (expires in 1 year)."
 
+# Generate an admin SAS token with write/delete permissions (for purge + finalize operations)
+echo "    Generating admin SAS token for hls-content blob write/delete..."
+UPSTREAM_ADMIN_SAS_TOKEN=$(az storage container generate-sas \
+  --account-name "$STORAGE_ACCOUNT" \
+  --name hls-content \
+  --permissions rwdl \
+  --expiry "$(date -u -v+1y '+%Y-%m-%dT%H:%MZ' 2>/dev/null || date -u -d '+1 year' '+%Y-%m-%dT%H:%MZ')" \
+  --https-only \
+  -o tsv)
+echo "    Admin SAS token generated (expires in 1 year)."
+
 DEPLOY_OUTPUT=$(az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
   --name "streamgate" \
@@ -267,6 +278,7 @@ DEPLOY_OUTPUT=$(az deployment group create \
     corsAllowedOrigin="$EFFECTIVE_CORS_ORIGIN" \
     platformAppUrl="$EFFECTIVE_PLATFORM_APP_URL" \
     upstreamSasToken="$UPSTREAM_SAS_TOKEN" \
+    upstreamAdminSasToken="$UPSTREAM_ADMIN_SAS_TOKEN" \
     adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
   --query 'properties.outputs' \
   --output json)
