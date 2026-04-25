@@ -30,11 +30,10 @@ export class UpstreamProxy {
     etag?: string;
   }> {
     const url = this.buildUpstreamUrl(eventId, filename);
-    console.log(`[upstream-fetch] url=${url.split('?')[0]} eventId=${eventId} filename=${filename}`);
     const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`Upstream returned ${response.status} for ${url.split('?')[0]}`);
+      throw new Error(`Upstream returned ${response.status}`);
     }
 
     const data = Buffer.from(await response.arrayBuffer());
