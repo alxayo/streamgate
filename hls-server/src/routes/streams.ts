@@ -242,14 +242,16 @@ export function createStreamRoutes(
           res.set('Content-Type', mimeType);
           res.send(data);
           return;
-        } catch {
+        } catch (err) {
+          console.error(`[upstream-error] eventId=${eventId} filename=${filename} error=${err}`);
           res.status(502).json({ error: 'Stream source unavailable' });
           return;
         }
       }
 
       res.status(404).json({ error: 'Not found' });
-    } catch {
+    } catch (err) {
+      console.error(`[stream-error] path=${req.path} error=${err}`);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
