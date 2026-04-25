@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users, QrCode } from 'lucide-react';
+import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users, QrCode, Eraser, Film, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EventStatusBadge } from '@/components/admin/event-status-badge';
@@ -29,6 +29,7 @@ interface EventDetail {
   accessWindowHours: number;
   isActive: boolean;
   isArchived: boolean;
+  autoPurge: boolean;
   activeViewers: number;
   _count: { tokens: number };
   tokenBreakdown: { unused: number; redeemed: number; expired: number; revoked: number };
@@ -60,6 +61,8 @@ export default function EventDetailPage() {
   const [deleteConfirmTitle, setDeleteConfirmTitle] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [purging, setPurging] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
 
   const fetchEvent = async () => {
     try {
@@ -115,6 +118,42 @@ export default function EventDetailPage() {
     fetchEvent();
   };
 
+  const handlePurge = async () => {
+    setPurging(true);
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/purge`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Purge complete. Deleted ${data.data.deletedBlobs} blob(s).`);
+      } else {
+        alert(`Purge failed: ${data.error}`);
+      }
+    } catch {
+      alert('Purge failed: network error');
+    } finally {
+      setPurging(false);
+    }
+  };
+
+  const handleFinalize = async () => {
+    if (!confirm('Convert this event to VOD? This will rebuild all playlists with #EXT-X-ENDLIST.')) return;
+    setFinalizing(true);
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/finalize`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Finalized as VOD. ${data.data.variants?.length || 0} variant(s) processed.`);
+        fetchEvent();
+      } else {
+        alert(`Finalize failed: ${data.error}`);
+      }
+    } catch {
+      alert('Finalize failed: network error');
+    } finally {
+      setFinalizing(false);
+    }
+  };
+
   const copyCode = (code: string, id: string) => {
     navigator.clipboard.writeText(code);
     setCopiedId(id);
@@ -141,6 +180,15 @@ export default function EventDetailPage() {
             }`}>
               {event.streamType === 'VOD' ? 'VOD' : 'Live'}
             </span>
+            {event.streamType === 'LIVE' && (
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                event.autoPurge
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-100 text-gray-500'
+              }`}>
+                {event.autoPurge ? 'Auto-purge ON' : 'Auto-purge OFF'}
+              </span>
+            )}
           </div>
           <p className="text-xs text-gray-400 mt-1 font-mono">{event.id}</p>
         </div>
@@ -198,6 +246,18 @@ export default function EventDetailPage() {
           <Button variant="outline" size="sm" className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
             onClick={async () => { await fetch(`/api/admin/events/${eventId}/reactivate`, { method: 'PATCH' }); fetchEvent(); }}>
             <Power className="h-3.5 w-3.5 mr-1" /> Reactivate
+          </Button>
+        )}
+        <Button variant="outline" size="sm" className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
+            onClick={handlePurge} disabled={purging}>
+          {purging ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Eraser className="h-3.5 w-3.5 mr-1" />}
+          Purge Stream
+        </Button>
+        {event.streamType === 'LIVE' && (
+          <Button variant="outline" size="sm" className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
+            onClick={handleFinalize} disabled={finalizing}>
+            {finalizing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Film className="h-3.5 w-3.5 mr-1" />}
+            Finalize as VOD
           </Button>
         )}
         <Button variant="destructive" size="sm" onClick={() => setShowDeleteDialog(true)}>
