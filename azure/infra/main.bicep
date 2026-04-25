@@ -222,7 +222,7 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               name: 'UPSTREAM_ORIGIN'
-              value: 'https://${storageAccountName}.blob.core.windows.net/hls-content/hls'
+              value: 'https://${storageAccountName}.blob.core.windows.net/hls-content'
             }
             ...(!empty(upstreamSasToken) ? [
               {
@@ -232,7 +232,7 @@ resource hlsApp 'Microsoft.App/containerApps@2024-03-01' = {
             ] : [])
             {
               name: 'STREAM_KEY_PREFIX'
-              value: 'live_'
+              value: '' // Empty for HTTP ingest mode (blobs at {eventId}/..., not live_{eventId}/...)
             }
             {
               name: 'SEGMENT_CACHE_ROOT'

@@ -13,12 +13,12 @@ Deploy StreamGate (ticket-gated HLS streaming platform) into the **same Azure Co
                     │  │ TCP :1935    │ hook │ FFmpeg ABR        │         │
                     │  └──────────────┘      │ 1080p/720p/480p  │         │
                     │                        └────────┬─────────┘         │
-                    │                            writes│                  │
+                    │                       HTTP PUT │(segments)          │
                     │                                 ▼                   │
-                    │   ┌──────────────┐     ┌────────────────┐           │
-                    │   │ blob-sidecar │◀────│  Azure Files   │           │
-                    │   │ syncs to blob│     │  hls-output    │           │
-                    │   └──────┬───────┘     └───────┬────────┘           │
+                    │                        ┌──────────────┐             │
+                    │                        │ hls-blob-    │             │
+                    │                        │ sidecar:8081 │             │
+                    │                        └──────┬───────┘             │
                     │          │                     │ mount (RW)         │
                     │          ▼                     ▼                    │
                     │  ┌───────────────┐    ┌────────────────────┐        │
@@ -49,19 +49,19 @@ Deploy StreamGate (ticket-gated HLS streaming platform) into the **same Azure Co
 
 The HLS server serves content directly from Azure Blob Storage (proxy mode) — no Azure Files SMB mount needed for HLS content. This avoids SMB caching issues that caused `master.m3u8` and variant playlists to disappear.
 
-1. **Upstream proxy** — Blob Storage at `https://<storage>.blob.core.windows.net/hls-content/hls/`
+1. **Upstream proxy** — Blob Storage at `https://<storage>.blob.core.windows.net/hls-content`
 2. **Segment cache** — Cached segments from previous upstream fetches at `/segment-cache`
 3. **Dynamic master.m3u8** — If `master.m3u8` is missing from blob, the HLS server probes the upstream for variant playlists (`stream_0/index.m3u8`, etc.) and generates it dynamically
 
-> **Important**: The blob sidecar (from rtmp-go) uploads HLS content to `hls-content/hls/live_{eventId}/`. The `UPSTREAM_ORIGIN` env var must include the `/hls` path prefix to match this structure.
+> **Important**: In HTTP ingest mode, the blob-sidecar uploads HLS content to `hls-content/{eventId}/` (no prefix). `UPSTREAM_ORIGIN` must **not** include a `/hls` suffix. `STREAM_KEY_PREFIX` must be empty (not `live_`).
 
 ### ABR Manifest Structure
 
 The HLS transcoder produces adaptive bitrate output:
 
 ```
-live_{eventId}/
-├── master.m3u8           # ABR master playlist (references sub-streams)
+{eventId}/
+├── master.m3u8           # ABR master playlist (uploaded by transcoder via HTTP PUT)
 ├── stream_0/index.m3u8   # 1080p variant
 ├── stream_0/seg_00001.ts
 ├── stream_1/index.m3u8   # 720p variant
@@ -69,6 +69,8 @@ live_{eventId}/
 ├── stream_2/index.m3u8   # 480p variant
 └── stream_2/seg_00001.ts
 ```
+
+> **Note**: `master.m3u8` is explicitly uploaded by the transcoder's `uploadMasterPlaylist()` function, not by FFmpeg. FFmpeg's `-master_pl_name` only writes to the local filesystem even in HTTP output mode.
 
 The master manifest is `master.m3u8` (not `stream.m3u8`). The platform's stream probe, token validation, and admin preview all reference this filename.
 
@@ -142,7 +144,9 @@ rtmp://stream.port-80.com/live/{EVENT_UUID}?token=<RTMP_AUTH_TOKEN>
 
 The `{EVENT_UUID}` is the event ID from StreamGate's admin console. The `<RTMP_AUTH_TOKEN>` is the shared secret configured in both the RTMP server (`-auth-token`) and StreamGate platform (`RTMP_AUTH_TOKEN` env var).
 
-> **Path mapping**: rtmp-go's HLS transcoder sanitizes stream keys by replacing `/` with `_`, so `live/{uuid}` produces output at `/hls-output/live_{uuid}/`. StreamGate's HLS server uses `STREAM_KEY_PREFIX=live_` to bridge this convention gap transparently.
+> **Path mapping (HTTP ingest mode)**: In HTTP ingest mode, the transcoder strips the `live/` app prefix and uses the event UUID directly, so blobs are stored at `{eventId}/stream_N/...`. `STREAM_KEY_PREFIX` must be empty.
+>
+> **Path mapping (file mode, legacy)**: In file-based Azure Files SMB mode, the transcoder sanitizes `live/{uuid}` to `live_{uuid}`. Set `STREAM_KEY_PREFIX=live_` to bridge this convention.
 
 ## Admin Workflow
 
@@ -274,21 +278,21 @@ Verify `CORS_ALLOWED_ORIGIN` matches the platform app's public URL exactly (incl
 ### Player loads but no video / "Stream source unavailable"
 Verify the full content delivery chain:
 
-1. **Check blob storage** — segments should exist at `hls-content/hls/live_{eventId}/`:
+1. **Check blob storage** — segments should exist at `hls-content/{eventId}/`:
    ```bash
    az storage blob list --account-name <storage> --container-name hls-content \
-     --prefix "hls/live_{eventId}/" --query "[].name" -o tsv | head
+     --prefix "{eventId}/" --query "[].name" -o tsv | head
    ```
 2. **Check blob public access** — must be enabled for upstream proxy fallback:
    ```bash
    az storage account show -n <storage> --query allowBlobPublicAccess
    az storage container show -n hls-content --account-name <storage> --query properties.publicAccess
    ```
-3. **Check UPSTREAM_ORIGIN** — must include `/hls` prefix:
+3. **Check UPSTREAM_ORIGIN** — must **not** include `/hls` suffix:
    ```bash
    az containerapp show -n <hls-app> -g rg-rtmpgo \
      --query "properties.template.containers[0].env[?name=='UPSTREAM_ORIGIN'].value" -o tsv
-   # Should be: https://<storage>.blob.core.windows.net/hls-content/hls
+   # Should be: https://<storage>.blob.core.windows.net/hls-content
    ```
 4. **Check HLS_SERVER_BASE_URL** — the `playbackBaseUrl` returned to the browser must point to the HLS server, not the platform:
    ```bash
@@ -310,7 +314,7 @@ Verify the HLS transcoder is writing to the `hls-output` share:
 ```bash
 az storage file list --share-name hls-output --account-name <storage> --output table
 ```
-Check that `STREAM_KEY_PREFIX=live_` is set on the HLS server (it maps `{eventId}` to `live_{eventId}` on disk).
+Check that `STREAM_KEY_PREFIX` is empty (for HTTP ingest mode) or `live_` (for legacy file mode). In HTTP ingest mode, blobs are stored at `{eventId}/...` without a prefix.
 
 ### Database issues
 SQLite database is stored on the `streamgate-data` Azure Files share at `/data/streamgate.db`. The entrypoint copies it to local disk (`/tmp/`) for POSIX locking compatibility. Check container startup logs for migration errors:

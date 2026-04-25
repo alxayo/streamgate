@@ -60,7 +60,7 @@ streams/
     └── stream_0/seg_000.ts
 ```
 
-> **Note**: The platform references `master.m3u8` as the entry-point manifest. If using FFmpeg's HLS muxer with ABR, use `-master_pl_name master.m3u8`.
+> **Note**: The platform references `master.m3u8` as the entry-point manifest. If using FFmpeg's HLS muxer with ABR, use `-master_pl_name master.m3u8` for local file mode. In HTTP ingest mode (Azure deployment), the hls-transcoder uploads `master.m3u8` explicitly via HTTP PUT — FFmpeg's `-master_pl_name` only writes to the local filesystem even in HTTP output mode.
 
 ### 6. Start Development Servers
 
