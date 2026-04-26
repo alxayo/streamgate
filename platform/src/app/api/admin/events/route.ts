@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isValidAccessWindow, isValidEventSchedule } from '@streaming/shared';
 import { env } from '@/lib/env';
+import { validateTranscoderConfig, validatePlayerConfig } from '@/lib/stream-config';
 
 // GET /api/admin/events — List all events with filters
 export async function GET(request: NextRequest) {
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/events — Create a new event
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours, autoPurge } = body;
+  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours, autoPurge, transcoderConfig, playerConfig } = body;
 
   // Validation
   if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -116,6 +117,20 @@ export async function POST(request: NextRequest) {
 
   const validStreamType = streamType === 'VOD' ? 'VOD' : 'LIVE';
 
+  // Validate stream config overrides if provided
+  if (transcoderConfig) {
+    const result = validateTranscoderConfig(transcoderConfig);
+    if (!result.valid) {
+      return NextResponse.json({ error: 'Invalid transcoder config', details: result.errors }, { status: 400 });
+    }
+  }
+  if (playerConfig) {
+    const result = validatePlayerConfig(playerConfig);
+    if (!result.valid) {
+      return NextResponse.json({ error: 'Invalid player config', details: result.errors }, { status: 400 });
+    }
+  }
+
   const event = await prisma.event.create({
     data: {
       title: title.trim(),
@@ -127,6 +142,9 @@ export async function POST(request: NextRequest) {
       endsAt: endDate,
       accessWindowHours: windowHours,
       autoPurge: typeof autoPurge === 'boolean' ? autoPurge : true,
+      // Stream config: store as JSON string if provided, null means use system defaults
+      transcoderConfig: transcoderConfig ? JSON.stringify(transcoderConfig) : null,
+      playerConfig: playerConfig ? JSON.stringify(playerConfig) : null,
     },
   });
 

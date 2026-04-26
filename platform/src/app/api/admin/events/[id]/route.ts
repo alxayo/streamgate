@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isValidAccessWindow, isValidEventSchedule } from '@streaming/shared';
 import { env } from '@/lib/env';
+import { validateTranscoderConfig, validatePlayerConfig } from '@/lib/stream-config';
 
 // GET /api/admin/events/:id — Get event details
 export async function GET(
@@ -72,7 +73,7 @@ export async function PUT(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours, autoPurge } = body;
+  const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours, autoPurge, transcoderConfig, playerConfig } = body;
 
   const existing = await prisma.event.findUnique({ where: { id } });
   if (!existing) {
@@ -109,6 +110,20 @@ export async function PUT(
 
   const validStreamType = streamType === 'VOD' || streamType === 'LIVE' ? streamType : undefined;
 
+  // Validate stream config overrides if provided
+  if (transcoderConfig !== undefined && transcoderConfig !== null) {
+    const result = validateTranscoderConfig(transcoderConfig);
+    if (!result.valid) {
+      return NextResponse.json({ error: 'Invalid transcoder config', details: result.errors }, { status: 400 });
+    }
+  }
+  if (playerConfig !== undefined && playerConfig !== null) {
+    const result = validatePlayerConfig(playerConfig);
+    if (!result.valid) {
+      return NextResponse.json({ error: 'Invalid player config', details: result.errors }, { status: 400 });
+    }
+  }
+
   const event = await prisma.event.update({
     where: { id },
     data: {
@@ -121,6 +136,13 @@ export async function PUT(
       startsAt: startDate,
       endsAt: endDate,
       accessWindowHours: windowHours,
+      // Stream config: store as JSON string if provided, explicit null clears overrides
+      ...(transcoderConfig !== undefined && {
+        transcoderConfig: transcoderConfig ? JSON.stringify(transcoderConfig) : null,
+      }),
+      ...(playerConfig !== undefined && {
+        playerConfig: playerConfig ? JSON.stringify(playerConfig) : null,
+      }),
     },
   });
 
