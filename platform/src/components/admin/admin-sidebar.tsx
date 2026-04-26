@@ -1,16 +1,46 @@
 'use client';
 
+// =========================================================================
+// Admin Sidebar Navigation
+// =========================================================================
+// The sidebar navigation for the admin console. It's responsive:
+//   - Desktop: always visible as a fixed sidebar on the left
+//   - Mobile: slides in as an overlay when the hamburger menu is tapped
+//
+// Navigation items are filtered based on the user's role/permissions.
+// For example, "Users" and "Audit Log" only appear for Super Admins.
+// Legacy sessions (old single-password auth) see all items.
+//
+// The sidebar fetches the current user's permissions from /api/admin/session
+// on mount to determine which items to show.
+// =========================================================================
+
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CalendarDays, Ticket, LayoutDashboard, Settings, LogOut, X } from 'lucide-react';
+import { CalendarDays, Ticket, LayoutDashboard, Settings, LogOut, X, Users, ScrollText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import type { Permission } from '@/lib/permissions';
 
-const navItems = [
+/** A navigation item in the sidebar. If requiredPermission is set,
+ *  the item is only visible to users who have that permission. */
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  requiredPermission?: Permission;
+}
+
+/** All possible navigation items. Items with requiredPermission are
+ *  conditionally shown based on the user's role. */
+const navItems: NavItem[] = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/events', label: 'Events', icon: CalendarDays },
   { href: '/admin/tokens', label: 'Tokens', icon: Ticket },
-  { href: '/admin/settings', label: 'Settings', icon: Settings },
+  { href: '/admin/settings', label: 'Settings', icon: Settings, requiredPermission: 'settings:manage' },
+  { href: '/admin/users', label: 'Users', icon: Users, requiredPermission: 'users:manage' },
+  { href: '/admin/audit-log', label: 'Audit Log', icon: ScrollText, requiredPermission: 'audit:view' },
 ];
 
 interface AdminSidebarProps {
@@ -20,11 +50,30 @@ interface AdminSidebarProps {
 
 function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
   const pathname = usePathname();
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [isLegacy, setIsLegacy] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/admin/session')
+      .then(res => res.json())
+      .then(data => {
+        setPermissions(data.permissions || []);
+        setIsLegacy(!!data.isLegacy);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleLogout = async () => {
     await fetch('/api/admin/logout', { method: 'POST' });
     window.location.href = '/admin/login';
   };
+
+  const visibleItems = navItems.filter(item => {
+    if (!item.requiredPermission) return true;
+    // Legacy sessions get all permissions
+    if (isLegacy) return true;
+    return permissions.includes(item.requiredPermission);
+  });
 
   return (
     <>
@@ -34,7 +83,7 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
       </div>
 
       <nav className="flex-1 px-3 space-y-1">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== '/admin' && pathname.startsWith(item.href));
           return (
             <Link

@@ -1,13 +1,27 @@
 'use client';
 
+// =========================================================================
+// Admin Layout (Shared Chrome)
+// =========================================================================
+// Wraps all /admin/* pages with the sidebar navigation and mobile header.
+// Special cases:
+//   - /admin/login and /admin/setup-2fa render WITHOUT the sidebar
+//   - Legacy auth mode shows an amber migration banner at the top
+//
+// The layout fetches the session state on mount to detect legacy mode
+// and conditionally display the migration banner.
+// =========================================================================
+
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { Menu } from 'lucide-react';
+import Link from 'next/link';
+import { Menu, AlertTriangle } from 'lucide-react';
 import { AdminSidebar } from '@/components/admin/admin-sidebar';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isLegacy, setIsLegacy] = useState(false);
 
   // Auto-close sidebar on route change
   useEffect(() => {
@@ -23,8 +37,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return () => document.removeEventListener('keydown', handleKeydown);
   }, []);
 
-  // Login page renders without the sidebar chrome
-  if (pathname === '/admin/login') {
+  // Check for legacy auth mode
+  useEffect(() => {
+    fetch('/api/admin/session')
+      .then(res => res.json())
+      .then(data => setIsLegacy(!!data.isLegacy))
+      .catch(() => {});
+  }, []);
+
+  // Login page and 2FA setup render without the sidebar chrome
+  if (pathname === '/admin/login' || pathname === '/admin/setup-2fa') {
     return <>{children}</>;
   }
 
@@ -45,6 +67,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </button>
           <h1 className="text-sm font-semibold text-gray-900">StreamGate</h1>
         </header>
+
+        {/* Legacy auth migration banner */}
+        {isLegacy && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+            <p className="text-sm text-amber-800">
+              Legacy authentication active. Set <code className="text-xs bg-amber-100 px-1 rounded">INITIAL_ADMIN_EMAIL</code> and{' '}
+              <code className="text-xs bg-amber-100 px-1 rounded">INITIAL_ADMIN_PASSWORD</code> env vars to create admin accounts with 2FA.{' '}
+              <Link href="/admin/users" className="underline font-medium">Manage Users</Link>
+            </p>
+          </div>
+        )}
 
         <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
       </div>
