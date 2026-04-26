@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { checkPermission } from '@/lib/require-permission';
 
 // GET /api/admin/tokens — List all tokens with filters
 export async function GET(request: NextRequest) {
+  const denied = await checkPermission('tokens:view');
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
   const eventId = searchParams.get('eventId');
   const status = searchParams.get('status');

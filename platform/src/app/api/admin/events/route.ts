@@ -3,9 +3,13 @@ import { prisma } from '@/lib/prisma';
 import { isValidAccessWindow, isValidEventSchedule } from '@streaming/shared';
 import { env } from '@/lib/env';
 import { validateTranscoderConfig, validatePlayerConfig } from '@/lib/stream-config';
+import { checkPermission } from '@/lib/require-permission';
 
 // GET /api/admin/events — List all events with filters
 export async function GET(request: NextRequest) {
+  const denied = await checkPermission('events:view');
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status') || 'active';
   const timeframe = searchParams.get('timeframe');
@@ -80,6 +84,9 @@ export async function GET(request: NextRequest) {
 
 // POST /api/admin/events — Create a new event
 export async function POST(request: NextRequest) {
+  const denied = await checkPermission('events:create');
+  if (denied) return denied;
+
   const body = await request.json();
   const { title, description, streamType, streamUrl, posterUrl, startsAt, endsAt, accessWindowHours, autoPurge, transcoderConfig, playerConfig } = body;
 

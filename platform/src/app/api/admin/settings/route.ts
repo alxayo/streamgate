@@ -17,6 +17,7 @@ import {
   validateTranscoderConfig,
   validatePlayerConfig,
 } from '@/lib/stream-config';
+import { checkPermission } from '@/lib/require-permission';
 
 /**
  * GET /api/admin/settings
@@ -24,6 +25,9 @@ import {
  * Uses the bootstrap guard — always returns data, even if DB was never seeded.
  */
 export async function GET() {
+  const denied = await checkPermission('dashboard:view');
+  if (denied) return denied;
+
   const defaults = await getSystemDefaults();
 
   return NextResponse.json({
@@ -43,6 +47,9 @@ export async function GET() {
  * Both fields are validated before saving. Invalid configs return 400.
  */
 export async function PUT(request: NextRequest) {
+  const denied = await checkPermission('settings:manage');
+  if (denied) return denied;
+
   const body = await request.json();
   const { transcoder, player } = body;
 

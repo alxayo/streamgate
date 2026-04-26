@@ -1,12 +1,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
+import { checkPermission } from '@/lib/require-permission';
 
 // Force dynamic rendering — these API routes need the database
 export const dynamic = 'force-dynamic';
 
 // GET /api/admin/dashboard — Dashboard summary statistics
 export async function GET() {
+  const denied = await checkPermission('dashboard:view');
+  if (denied) return denied;
+
   const now = new Date();
   const heartbeatCutoff = new Date(Date.now() - env.SESSION_TIMEOUT_SECONDS * 1000);
 
