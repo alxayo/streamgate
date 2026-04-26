@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CalendarDays, Ticket, LayoutDashboard, LogOut, X } from 'lucide-react';
+import { CalendarDays, Ticket, LayoutDashboard, Settings, LogOut, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -10,6 +10,7 @@ const navItems = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/events', label: 'Events', icon: CalendarDays },
   { href: '/admin/tokens', label: 'Tokens', icon: Ticket },
+  { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];
 
 interface AdminSidebarProps {
