@@ -18,10 +18,19 @@ npm install
 
 ### 2. Generate Admin Password Hash
 
+This creates the initial super admin account on first boot. Additional users are managed via the Admin Console after setup.
+
 ```bash
 npm run hash-password
 # Enter your desired admin password when prompted
 # Copy the output ADMIN_PASSWORD_HASH=... into your .env files
+```
+
+You also need an `ADMIN_SESSION_SECRET` for session cookie encryption and TOTP secret storage:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+# Copy the output into ADMIN_SESSION_SECRET in your .env files
 ```
 
 ### 3. Configure Environment
@@ -102,6 +111,7 @@ docker run -p 3000:3000 \
   -e PLAYBACK_SIGNING_SECRET="your-secret" \
   -e INTERNAL_API_KEY="your-api-key" \
   -e ADMIN_PASSWORD_HASH="your-hash" \
+  -e ADMIN_SESSION_SECRET="your-session-secret" \
   -e HLS_SERVER_BASE_URL="https://stream.example.com" \
   streaming-platform
 ```
@@ -151,6 +161,15 @@ See `.env.example` files in each service directory and the root `.env.example` f
 |----------|-------------|
 | `PLAYBACK_SIGNING_SECRET` | HMAC-SHA256 secret for JWT signing/verification (min 32 chars). **Must match** between Platform App and HLS Server. |
 | `INTERNAL_API_KEY` | API key for server-to-server communication. **Must match** between services. |
+
+### Platform App Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ADMIN_PASSWORD_HASH` | Bcrypt hash of the initial super admin password (used for first-boot seeding only). |
+| `ADMIN_SESSION_SECRET` | Secret for iron-session cookie encryption and AES-256-GCM TOTP secret encryption (min 32 chars). |
+| `DATABASE_URL` | Database connection string (`file:./dev.db` for SQLite, `postgresql://...` for production). |
+| `SESSION_TIMEOUT_SECONDS` | Seconds before an inactive viewing session is abandoned (default: 60). |
 
 ### Generating Secrets
 

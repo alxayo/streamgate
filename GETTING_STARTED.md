@@ -166,7 +166,8 @@ INTERNAL_API_KEY=                # You'll generate this in Step 3
 
 # === Platform App ===
 DATABASE_URL=file:./dev.db       # SQLite for local dev (auto-created)
-ADMIN_PASSWORD_HASH=             # You'll generate this in Step 3
+ADMIN_PASSWORD_HASH=             # You'll generate this in Step 3 (initial super admin password)
+ADMIN_SESSION_SECRET=            # You'll generate this in Step 3 (session + TOTP encryption)
 HLS_SERVER_BASE_URL=http://localhost:4000
 NEXT_PUBLIC_APP_NAME=StreamGate
 SESSION_TIMEOUT_SECONDS=60
@@ -185,18 +186,21 @@ PORT=4000
 
 ### 2.3 Generate Secrets
 
-You need three random secrets:
-1. **PLAYBACK_SIGNING_SECRET** — 32+ random characters (HMAC signing key)
+You need four values:
+1. **PLAYBACK_SIGNING_SECRET** — 32+ random characters (HMAC signing key for viewer JWTs)
 2. **INTERNAL_API_KEY** — Random string for internal endpoint protection
-3. **ADMIN_PASSWORD_HASH** — Bcrypt hash of your admin password
+3. **ADMIN_PASSWORD_HASH** — Bcrypt hash of the initial super admin password
+4. **ADMIN_SESSION_SECRET** — 32+ random characters (session cookie encryption + TOTP secret encryption)
 
 The next step will handle this.
 
 ---
 
-## Step 3: Generate Admin Password Hash
+## Step 3: Generate Admin Credentials and Secrets
 
-### 3.1 Run the Password Hashing Script
+### 3.1 Generate Initial Admin Password Hash
+
+The initial super admin account is automatically created on first server boot using this hash. After setup, additional users are managed via the Admin Console.
 
 ```bash
 npm run hash-password
@@ -236,14 +240,23 @@ openssl rand -base64 32
 node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
 ```
 
-### 3.4 Update `.env` File
+### 3.4 Generate ADMIN_SESSION_SECRET
 
-Edit `.env` and fill in the three values:
+This secret encrypts both the admin session cookies and the TOTP secrets stored in the database:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+### 3.5 Update `.env` File
+
+Edit `.env` and fill in the four values:
 
 ```bash
 PLAYBACK_SIGNING_SECRET=<your-32-char-secret>
 INTERNAL_API_KEY=<your-random-string>
 ADMIN_PASSWORD_HASH=<output-from-hash-password>
+ADMIN_SESSION_SECRET=<your-32-char-secret>
 ```
 
 **⚠️ CRITICAL**: The same `PLAYBACK_SIGNING_SECRET` value **must** appear in both services. When you start the services, they will share this secret automatically.
@@ -517,17 +530,30 @@ Navigate to:
 http://localhost:3000/admin
 ```
 
-You'll see a **Login** page. Enter your admin password (the one you hashed in **Step 3**).
+You'll see a **Login** page with a multi-step authentication flow:
 
-**Expected login credentials:**
-- Username: `admin` (implicit, auto-filled)
-- Password: `<your-password-you-chose-in-step-3>`
+**Step 1 — Credentials:**
+- Username: `admin` (the default super admin created on first boot)
+- Password: The password you hashed in **Step 3**
+
+**Step 2 — Two-Factor Authentication:**
+- On your first login, you'll be redirected to set up 2FA
+- Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.)
+- Enter the 6-digit code from your authenticator to confirm setup
+- **Save your recovery codes!** — These are one-time backup codes in case you lose your authenticator
+
+**Subsequent logins:**
+- Enter username + password → Enter 6-digit TOTP code from your authenticator app
+
+:::tip First-time setup
+The first time you log in, you'll complete a 4-step 2FA setup wizard. This is mandatory — you cannot access the admin console without 2FA enabled.
+:::
 
 #### 7.4.2 Admin Dashboard
 
-After login, you'll see the **Admin Console** with three sections:
+After login, you'll see the **Admin Console** with a permission-aware sidebar. Available sections depend on your role:
 
-**A. Events Tab**
+**A. Events Tab** (admin+ roles)
 
 - **List of all streaming events** (live & archived)
 - **Create Event** form:
@@ -541,21 +567,27 @@ After login, you'll see the **Admin Console** with three sections:
 
 Deactivating an event immediately revokes all active tokens for that event.
 
-**B. Tokens Tab**
+**B. Tokens Tab** (admin+ roles)
 
 - **List of all tokens** for the selected event
 - **Generate New Tokens** form:
   - Event: Select target event
-  - Quantity: Number of tokens to generate (1–1000)
+  - Quantity: Number of tokens to generate (1–500)
   - **Auto-generated**: 12-character alphanumeric codes
   - **Actions**: Copy, Revoke, Delete
 
 Once a token is revoked, it's blocked on the HLS server immediately (≤30 seconds).
 
-**C. Revocations Tab** (if available)
+**C. Users Tab** (super_admin only)
 
-- Shows recently revoked tokens and deactivated events
-- Useful for debugging revocation sync
+- **List of all admin users** with role, 2FA status, and last login
+- **Create User** form: username, password, role selection
+- **Actions**: Edit, Reset 2FA, Deactivate/Reactivate
+
+**D. Audit Log** (super_admin only)
+
+- Immutable history of all admin actions (logins, user changes, token operations)
+- Filterable by action type, username, and date range
 
 #### 7.4.3 Example: Create an Event and Tokens
 
@@ -949,13 +981,13 @@ HLS server caches revocations for the interval. Revocation propagation is **even
    ```
 3. Then restart the HLS server
 
-### Issue 5: "Admin Password Incorrect"
+### Issue 5: "Admin Login Problems"
 
 **Symptom:**
 - Can't log in to Admin Console
-- "Incorrect password" message
+- "Invalid credentials" or "Invalid code" message
 
-**Solution:**
+**Solution for password issues:**
 
 1. **Verify password hash is in `.env`:**
    ```bash
@@ -970,11 +1002,19 @@ HLS server caches revocations for the interval. Revocation propagation is **even
    # Copy the output to .env
    ```
 
-3. **Restart Platform App:**
-   - Stop the running `npm run dev` in Terminal 1
-   - Update `.env`
-   - Restart the Platform App
-   - Try logging in again
+3. **Restart Platform App** and the default super_admin will be re-seeded with the new hash
+
+**Solution for 2FA issues:**
+
+1. **Lost authenticator app?** Use one of your saved recovery codes on the login screen (click "Use recovery code")
+2. **Lost recovery codes too?** A super_admin can reset your 2FA from the Users page
+3. **Only admin and locked out?** Use emergency login:
+   ```bash
+   curl -X POST http://localhost:3000/api/admin/emergency-login \
+     -H "Content-Type: application/json" \
+     -d '{"username": "admin", "password": "your-password", "emergencyKey": "<ADMIN_SESSION_SECRET value>"}'
+   ```
+4. **Verify ADMIN_SESSION_SECRET is set** — this is required for session encryption and TOTP operations
 
 ### Issue 6: Database Locked / Migration Issues
 

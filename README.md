@@ -32,13 +32,13 @@ A ticket-gated HTML5 video streaming platform with two independently deployable 
 # 1. Install dependencies
 npm install
 
-# 2. Generate secrets and admin password
-npm run hash-password
+# 2. Generate secrets
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 # 3. Configure environment
 cp .env.example .env
-# Edit .env with generated secrets
+# Edit .env with generated secrets (PLAYBACK_SIGNING_SECRET, INTERNAL_API_KEY, ADMIN_SESSION_SECRET)
+# Set ADMIN_PASSWORD_HASH for the initial super_admin user (npm run hash-password)
 
 # 4. Initialize database
 cd platform
@@ -56,7 +56,7 @@ cd hls-server && set -a && source ../.env && set +a && npm run dev    # Terminal
 
 **Access the application:**
 - Viewer Portal: http://localhost:3000
-- Admin Console: http://localhost:3000/admin
+- Admin Console: http://localhost:3000/admin (multi-user with 2FA)
 - HLS Server Health: http://localhost:4000/health
 
 ## Project Structure
