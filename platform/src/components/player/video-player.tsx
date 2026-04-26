@@ -10,12 +10,19 @@ import { TimeDisplay } from './time-display';
 import { FullscreenToggle } from './fullscreen-toggle';
 import { QualitySelector } from './quality-selector';
 import { LoadingOverlay } from './loading-overlay';
+import type { PlayerConfig } from '@streaming/shared';
 
+/**
+ * VideoPlayer props.
+ * - playerConfig is optional for backward compatibility during rollout.
+ *   If undefined, falls back to hardcoded defaults matching the current behavior.
+ */
 interface VideoPlayerProps {
   streamUrl: string;
   isLive: boolean;
   getToken: () => string;
   onStreamError?: (errorType: 'auth' | 'network') => void;
+  playerConfig?: PlayerConfig;
 }
 
 interface QualityLevel {
@@ -43,7 +50,7 @@ function requestFullscreen(el: HTMLElement): void {
   }
 }
 
-export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: VideoPlayerProps) {
+export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError, playerConfig }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -69,13 +76,35 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: Vide
 
     // Prefer hls.js (works on Chrome, Firefox, and Safari with MSE — macOS 11+, iOS 15+)
     if (Hls.isSupported()) {
+      // Build effective player config: use per-event config if available,
+      // otherwise fall back to hardcoded defaults matching previous behavior.
+      const effectiveConfig: PlayerConfig = playerConfig ?? {
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 6,
+        backBufferLength: 0,
+        lowLatencyMode: true,
+      };
+
+      // Map backBufferLength -1 to Infinity (hls.js convention for "keep all")
+      const hlsBackBuffer = effectiveConfig.backBufferLength === -1
+        ? Infinity
+        : effectiveConfig.backBufferLength;
+
       const hls = new Hls({
         xhrSetup: (xhr) => {
           xhr.setRequestHeader('Authorization', `Bearer ${getToken()}`);
         },
         enableWorker: true,
-        lowLatencyMode: isLive,
-        ...(isLive && { liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 6 }),
+        // Live-only settings: omit entirely for VOD playback.
+        // lowLatencyMode=false for VOD prevents unexpected seek behavior.
+        ...(isLive ? {
+          lowLatencyMode: effectiveConfig.lowLatencyMode,
+          liveSyncDurationCount: effectiveConfig.liveSyncDurationCount,
+          liveMaxLatencyDurationCount: effectiveConfig.liveMaxLatencyDurationCount,
+          backBufferLength: hlsBackBuffer,
+        } : {
+          lowLatencyMode: false,
+        }),
       });
 
       hls.loadSource(streamUrl);
@@ -123,7 +152,8 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError }: Vide
       };
     }
 
-    // Fallback: native HLS for old iOS Safari (< iOS 15) where MSE is unavailable
+    // Fallback: native HLS for old iOS Safari (< iOS 15) where MSE is unavailable.
+    // PlayerConfig settings are hls.js-only; native HLS has no tuning knobs.
     if (supportsNativeHls()) {
       const token = getToken();
       const url = new URL(streamUrl, window.location.origin);

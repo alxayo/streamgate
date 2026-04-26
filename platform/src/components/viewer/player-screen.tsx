@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { ArrowLeft, Clock } from 'lucide-react';
 import { VideoPlayer } from '@/components/player/video-player';
 import { LiveBadge, RecordingBadge } from '@/components/player/live-badge';
@@ -90,6 +90,10 @@ export function PlayerScreen({ data, code, onBack }: PlayerScreenProps) {
   const isPreEvent = !data.event.isLive && eventStatus === 'not-started';
   const streamUrl = `${data.playbackBaseUrl}${data.streamPath}`;
 
+  // Memoize playerConfig to avoid unnecessary hls.js teardown/recreate
+  // on re-renders (the config object reference must be stable)
+  const memoizedPlayerConfig = useMemo(() => data.playerConfig, [data.playerConfig]);
+
   return (
     <div className="flex flex-col h-screen bg-black">
       {/* Header */}
@@ -131,6 +135,7 @@ export function PlayerScreen({ data, code, onBack }: PlayerScreenProps) {
             isLive={isLive}
             getToken={getToken}
             onStreamError={handleStreamError}
+            playerConfig={memoizedPlayerConfig}
           />
         )}
 
