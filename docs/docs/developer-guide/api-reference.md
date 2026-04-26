@@ -43,12 +43,20 @@ curl -X POST http://localhost:3000/api/tokens/validate \
   "playbackBaseUrl": "http://localhost:4000",
   "streamPath": "/streams/abc-123-uuid/",
   "expiresAt": "2025-03-17T17:00:00.000Z",
-  "tokenExpiresIn": 3600
+  "tokenExpiresIn": 3600,
+  "playerConfig": {
+    "liveSyncDurationCount": 2,
+    "liveMaxLatencyDurationCount": 4,
+    "backBufferLength": 0,
+    "lowLatencyMode": true
+  }
 }
 ```
 
 :::note
 `playbackBaseUrl` is dynamically derived from the request's hostname. If the request comes from `192.168.0.11:3000`, the response returns `http://192.168.0.11:4000` instead of `http://localhost:4000`.
+
+`playerConfig` contains the merged (system defaults + per-event overrides) player configuration. The video player uses these values to configure hls.js. If absent, the player falls back to hardcoded defaults.
 :::
 
 **Error Responses:**
@@ -475,7 +483,7 @@ curl http://localhost:3000/api/admin/dashboard -b cookies.txt
 
 ## Internal API
 
-Used by the HLS Media Server for revocation synchronization. Authenticated via `X-Internal-Api-Key` header.
+Used by the HLS Media Server and HLS Transcoder for revocation synchronization and stream configuration. Authenticated via `X-Internal-Api-Key` header.
 
 ### GET /api/revocations
 
@@ -529,6 +537,151 @@ curl "http://localhost:3000/api/revocations?since=2025-03-15T10:00:00.000Z" \
 :::info
 The `serverTime` field in the response should be used as the `since` value for the next poll. This ensures no revocations are missed between polls, even if clocks are slightly out of sync.
 :::
+
+---
+
+### GET /api/internal/stream-config/defaults
+
+Returns system-wide transcoder and player defaults. Used by the HLS transcoder to cache defaults at startup and refresh periodically.
+
+**Request:**
+
+```bash
+curl http://localhost:3000/api/internal/stream-config/defaults \
+  -H "X-Internal-Api-Key: your-internal-api-key"
+```
+
+**Success Response (200):**
+
+```json
+{
+  "transcoder": {
+    "codecs": ["h264"],
+    "profile": "full-abr-1080p-720p-480p",
+    "hlsTime": 2,
+    "hlsListSize": 6,
+    "forceKeyFrameInterval": 2,
+    "h264": { "tune": "zerolatency", "preset": "ultrafast" }
+  },
+  "player": {
+    "liveSyncDurationCount": 2,
+    "liveMaxLatencyDurationCount": 4,
+    "backBufferLength": 0,
+    "lowLatencyMode": true
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `401` | Missing or invalid `X-Internal-Api-Key` | `{ "error": "Unauthorized" }` |
+
+:::info Bootstrap Guard
+If the `SystemSettings` row doesn't exist in the database, this endpoint automatically creates it with hardcoded defaults and returns those. It never returns a 500 for a missing row.
+:::
+
+---
+
+### GET /api/internal/events/:id/stream-config
+
+Returns the merged (effective) stream configuration for a specific event. The transcoder calls this endpoint on each `publish_start` to get the FFmpeg arguments for the event.
+
+**Request:**
+
+```bash
+curl http://localhost:3000/api/internal/events/abc-123/stream-config \
+  -H "X-Internal-Api-Key: your-internal-api-key"
+```
+
+**Success Response (200):**
+
+```json
+{
+  "eventId": "abc-123",
+  "eventActive": true,
+  "configSource": "event",
+  "transcoder": {
+    "codecs": ["h264"],
+    "profile": "full-abr-1080p-720p-480p",
+    "hlsTime": 2,
+    "hlsListSize": 6,
+    "forceKeyFrameInterval": 2,
+    "h264": { "tune": "zerolatency", "preset": "ultrafast" }
+  },
+  "player": {
+    "liveSyncDurationCount": 2,
+    "liveMaxLatencyDurationCount": 4,
+    "backBufferLength": 0,
+    "lowLatencyMode": true
+  }
+}
+```
+
+The `configSource` field is `"event"` when the event has per-event overrides, or `"system-default"` when using only system defaults. This is for observability only.
+
+**Error Responses:**
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `401` | Missing or invalid `X-Internal-Api-Key` | `{ "error": "Unauthorized" }` |
+| `404` | Event not found or deactivated | `{ "error": "Event not found" }` |
+
+---
+
+### GET /api/admin/events/:id/stream-config
+
+Returns the effective stream configuration and RTMP ingest endpoints for an event. Used by the admin event detail page.
+
+**Request:**
+
+```bash
+curl http://localhost:3000/api/admin/events/abc-123/stream-config \
+  -b cookies.txt
+```
+
+**Success Response (200):**
+
+```json
+{
+  "streamConfig": {
+    "transcoder": { ... },
+    "player": { ... }
+  },
+  "configSource": "default",
+  "ingestEndpoints": {
+    "rtmpUrl": "rtmp://rtmp.example.com:1935/live/abc-123?token=secret",
+    "obsServer": "rtmp://rtmp.example.com:1935/live",
+    "obsStreamKey": "abc-123?token=secret",
+    "srtUrl": null
+  }
+}
+```
+
+---
+
+### GET /api/admin/settings
+
+Returns the current system-wide stream defaults.
+
+```bash
+curl http://localhost:3000/api/admin/settings -b cookies.txt
+```
+
+### PUT /api/admin/settings
+
+Updates system-wide transcoder and player defaults.
+
+```bash
+curl -X PUT http://localhost:3000/api/admin/settings \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{
+    "transcoderDefaults": { "hlsTime": 2, "profile": "full-abr-1080p-720p-480p", ... },
+    "playerDefaults": { "liveSyncDurationCount": 2, ... }
+  }'
+```
 
 ---
 

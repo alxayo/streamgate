@@ -55,6 +55,9 @@ Set these in `platform/.env` or the root `.env` file.
 | `HLS_SERVER_BASE_URL` | ✅ | `http://localhost:4000` | Base URL of the HLS Media Server. In development, the actual URL sent to browsers is dynamically derived from the request's hostname (preserving the HLS server port), so LAN clients automatically get a reachable address. In production, set this to the public URL viewers will use. |
 | `NEXT_PUBLIC_APP_NAME` | ❌ | `StreamGate` | Application name displayed in the UI. The `NEXT_PUBLIC_` prefix makes it available in the browser. |
 | `SESSION_TIMEOUT_SECONDS` | ❌ | `60` | Seconds of missed heartbeats before a viewing session is considered abandoned and automatically released. Lower values free up tokens faster; higher values tolerate more network instability. See [Live Streaming Tuning Guide](./live-streaming-tuning.md#session-timeout-session_timeout_seconds) for trade-offs. |
+| `RTMP_SERVER_HOST` | ❌ | — | RTMP server hostname/URL for ingest endpoint display in admin UI (e.g., `rtmp://rtmp.example.com:1935`). When set, the event detail page shows copy-ready RTMP ingest URLs. |
+| `RTMP_AUTH_TOKEN` | ❌ | — | Shared secret for RTMP publish authentication. Appended to ingest URLs as `?token=` parameter. Also used to validate RTMP `on_publish` callbacks at `/api/rtmp/auth`. |
+| `SRT_SERVER_HOST` | ❌ | — | SRT server hostname for ingest endpoint display (e.g., `srt://srt.example.com:9000`). When set, the event detail page includes an SRT ingest URL. |
 
 ### Database URL Examples
 

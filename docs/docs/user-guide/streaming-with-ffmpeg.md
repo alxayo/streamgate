@@ -5,7 +5,11 @@ title: Live Streaming with FFmpeg
 
 # Live Streaming with FFmpeg
 
-StreamGate doesn't include a built-in transcoder — it serves HLS content that you generate. **FFmpeg** is the recommended tool for converting live video (RTMP, camera feeds) or existing files (MP4) into HLS format that StreamGate can deliver.
+StreamGate doesn't include a built-in transcoder for local development — it serves HLS content that you generate. **FFmpeg** is the recommended tool for converting live video (RTMP, camera feeds) or existing files (MP4) into HLS format that StreamGate can deliver.
+
+:::tip Cloud Deployment
+In Azure cloud deployments, the HLS Transcoder service handles FFmpeg automatically. It fetches per-event stream configuration from the Platform App (segment duration, rendition profile, H.264 settings) and builds FFmpeg arguments dynamically. See the [Azure deployment docs](https://github.com/your-org/rtmp-go/tree/main/azure) for details. The information below applies to **local development** where you run FFmpeg manually.
+:::
 
 ## How It Works
 

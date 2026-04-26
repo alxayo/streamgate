@@ -26,6 +26,7 @@ StreamGate consists of two independently deployable services:
 They communicate through:
 - **JWT tokens** — Browser sends `Authorization: Bearer` to HLS Server on every segment request
 - **Revocation polling** — HLS Server polls `GET /api/revocations` from Platform App every 30 seconds
+- **Stream config API** — HLS Transcoder fetches per-event stream configuration from Platform App via `GET /api/internal/events/:id/stream-config` on each `publish_start`, and caches system defaults from `GET /api/internal/stream-config/defaults`
 
 Both services have Docker images (`node:20-alpine`, multi-stage builds) ready for containerized deployment.
 
@@ -40,6 +41,7 @@ Both services have Docker images (`node:20-alpine`, multi-stage builds) ready fo
 | Revocation cache (HLS) | In-memory `Map`, populated by polling | Per-instance — each instance independently polls and builds its own cache (eventually consistent within 30s) |
 | Segment cache (HLS) | Local disk LRU | Per-instance — each instance caches independently; acceptable when Blob Storage is the source of truth |
 | Inflight deduplication (HLS) | In-memory `Map<string, Promise>` | Per-instance — duplicate upstream fetches possible across instances but not incorrect |
+| Stream config (Transcoder) | Fetched from Platform API per-event; system defaults cached in-memory for 10 min | Per-instance — each transcoder fetches independently; eventual consistency acceptable since config changes are rare |
 
 ---
 

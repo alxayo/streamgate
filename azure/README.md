@@ -45,6 +45,17 @@ Deploy StreamGate (ticket-gated HLS streaming platform) into the **same Azure Co
 
 **StreamGate-specific resources**: 2 Container Apps, 1 Azure Files share (segment cache), 1 storage mount
 
+### Dynamic Stream Configuration
+
+The HLS transcoder fetches per-event stream configuration from the StreamGate Platform App on each `publish_start`. This enables per-event tuning of:
+
+- **Transcoder settings**: rendition profile, segment duration, H.264 tune/preset, keyframe interval
+- **Player settings**: hls.js buffer sizes, low-latency mode, max latency before catch-up
+
+System-wide defaults are cached at transcoder startup and refreshed every 10 minutes. Per-event overrides are fetched on demand. If the Platform API is unavailable, the transcoder falls back to cached defaults.
+
+Admin UI at `/admin/settings` controls system defaults; per-event overrides are in the event edit form under "Advanced Stream Settings". The event detail page shows ingest endpoints (RTMP URL, OBS server/key) and effective configuration.
+
 ### HLS Content Delivery Chain
 
 The HLS server serves content directly from Azure Blob Storage (proxy mode) — no Azure Files SMB mount needed for HLS content. This avoids SMB caching issues that caused `master.m3u8` and variant playlists to disappear.

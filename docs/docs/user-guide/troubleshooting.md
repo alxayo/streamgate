@@ -412,6 +412,32 @@ ffmpeg -listen 1 -i rtmp://0.0.0.0:1936/live/stream ...
 
 ---
 
+## Stream Configuration Issues
+
+### Transcoder Using Default Config Instead of Per-Event Settings
+
+**Symptom:** Stream uses system defaults even though per-event overrides were configured in the admin UI.
+
+**Cause:** The HLS transcoder couldn't reach the Platform App's internal API, or the event ID in the stream key doesn't match the event ID in the database.
+
+**Fix:**
+1. Verify the transcoder has `-platform-url` and `-platform-api-key` flags set correctly
+2. Check transcoder logs for `config_source` field — it should show `event` for per-event config, or `system-default` / `hardcoded` for fallback
+3. Verify the RTMP stream key format is `live/{eventId}` where `{eventId}` matches the UUID in the admin console
+4. Test the API directly: `curl -H "X-Internal-Api-Key: <key>" https://<platform>/api/internal/events/<id>/stream-config`
+
+### High Latency Despite Low-Latency Settings
+
+**Symptom:** Latency is still high (~15–20s) even after configuring `hlsTime: 2` and `liveSyncDurationCount: 2`.
+
+**Cause:** The source encoder's keyframe interval may be longer than the segment duration. In copy/passthrough mode (1080p in Full ABR profile), FFmpeg can only cut segments at keyframes — so if the source sends keyframes every 4 seconds, segments will be ~4s regardless of `hlsTime`.
+
+**Fix:**
+1. Set your source encoder's keyframe interval to 1–2 seconds (in OBS: Settings → Output → Keyframe Interval = 1)
+2. Use a rendition profile that transcodes all renditions (e.g., `low-latency-1080p-720p-480p`) — transcoded renditions use forced keyframes and respect `hlsTime` precisely
+
+---
+
 ## Getting Help
 
 If your issue isn't covered here:

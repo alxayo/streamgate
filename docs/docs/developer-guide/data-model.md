@@ -5,7 +5,7 @@ title: Data Model
 
 # Data Model
 
-StreamGate uses **Prisma ORM** with three core models: `Event`, `Token`, and `ActiveSession`. The schema is defined in `platform/prisma/schema.prisma`.
+StreamGate uses **Prisma ORM** with four core models: `Event`, `Token`, `ActiveSession`, and `SystemSettings`. The schema is defined in `platform/prisma/schema.prisma`.
 
 ## Entity Relationship Diagram
 
@@ -16,6 +16,7 @@ StreamGate uses **Prisma ORM** with three core models: `Event`, `Token`, and `Ac
 │  id              String  (PK, UUID) │
 │  title           String             │
 │  description     String?            │
+│  streamType      String  (LIVE/VOD) │
 │  streamUrl       String?            │
 │  posterUrl       String?            │
 │  startsAt        DateTime           │
@@ -23,6 +24,9 @@ StreamGate uses **Prisma ORM** with three core models: `Event`, `Token`, and `Ac
 │  accessWindowHours  Int  (default 48)│
 │  isActive        Boolean (default T) │
 │  isArchived      Boolean (default F) │
+│  autoPurge       Boolean (default T) │
+│  transcoderConfig String? (JSON)    │
+│  playerConfig     String? (JSON)    │
 │  createdAt       DateTime (auto)    │
 │  updatedAt       DateTime (auto)    │
 └─────────────┬───────────────────────┘
@@ -55,6 +59,15 @@ StreamGate uses **Prisma ORM** with three core models: `Event`, `Token`, and `Ac
 │  userAgent       String?            │
 │  createdAt       DateTime (auto)    │
 └─────────────────────────────────────┘
+
+┌─────────────────────────────────────┐
+│         SystemSettings              │
+│─────────────────────────────────────│
+│  id               String (PK)      │
+│  transcoderDefaults String (JSON)   │
+│  playerDefaults    String (JSON)    │
+│  updatedAt         DateTime (auto)  │
+└─────────────────────────────────────┘
 ```
 
 **Relationships:**
@@ -71,6 +84,7 @@ An event represents a streaming occasion — a live broadcast, recorded session,
 | `id` | `String` | UUID (auto) | Primary key |
 | `title` | `String` | — | Display title shown to viewers |
 | `description` | `String?` | `null` | Optional description |
+| `streamType` | `String` | `"LIVE"` | Event type: `"LIVE"` or `"VOD"` |
 | `streamUrl` | `String?` | `null` | Upstream origin URL (proxy/hybrid mode) |
 | `posterUrl` | `String?` | `null` | Poster image URL for pre-event/ended screens |
 | `startsAt` | `DateTime` | — | Scheduled start time |
@@ -78,6 +92,9 @@ An event represents a streaming occasion — a live broadcast, recorded session,
 | `accessWindowHours` | `Int` | `48` | Hours after `endsAt` that tokens remain valid |
 | `isActive` | `Boolean` | `true` | Whether the event is accessible to viewers |
 | `isArchived` | `Boolean` | `false` | Whether the event is archived (hidden from active listings) |
+| `autoPurge` | `Boolean` | `true` | Whether to auto-purge expired tokens |
+| `transcoderConfig` | `String?` | `null` | JSON: per-event transcoder overrides (null = use system defaults) |
+| `playerConfig` | `String?` | `null` | JSON: per-event player overrides (null = use system defaults) |
 | `createdAt` | `DateTime` | `now()` | Creation timestamp |
 | `updatedAt` | `DateTime` | auto | Last modification timestamp |
 
@@ -196,6 +213,64 @@ An active session represents a currently viewing user. It enforces single-device
 
 :::tip
 The session timeout is configurable via `SESSION_TIMEOUT_SECONDS` (default: 60). A session is stale when `lastHeartbeat < now - SESSION_TIMEOUT_SECONDS`.
+:::
+
+## SystemSettings Model
+
+A singleton model storing system-wide default configuration for stream transcoding and player behavior. Managed via the Admin Settings page (`/admin/settings`).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `String` | `"default"` | Singleton primary key |
+| `transcoderDefaults` | `String` | — | JSON: system-wide transcoder defaults (`TranscoderConfig`) |
+| `playerDefaults` | `String` | — | JSON: system-wide player defaults (`PlayerConfig`) |
+| `updatedAt` | `DateTime` | auto | Last modification timestamp |
+
+### Stream Configuration Inheritance
+
+Stream configuration follows a two-level inheritance model:
+
+1. **System defaults** — stored in `SystemSettings`, editable at `/admin/settings`
+2. **Per-event overrides** — stored in `Event.transcoderConfig` / `Event.playerConfig` (null = inherit system defaults)
+
+The effective config for any event is computed server-side via `mergeStreamConfig()`:
+
+```typescript
+const effective = {
+  ...systemDefaults.transcoder,
+  ...eventOverrides?.transcoder,
+  h264: { ...systemDefaults.transcoder.h264, ...(eventOverrides?.transcoder?.h264 ?? {}) },
+};
+```
+
+- New events start with `null` overrides and inherit system defaults
+- If system defaults change, all inheriting events pick up the new values automatically
+- Per-event overrides are stored only when the admin explicitly customizes an event
+- The admin UI shows a "System Default" / "Custom" badge per event
+
+### Default Configuration Values
+
+```json
+{
+  "transcoder": {
+    "codecs": ["h264"],
+    "profile": "full-abr-1080p-720p-480p",
+    "hlsTime": 2,
+    "hlsListSize": 6,
+    "forceKeyFrameInterval": 2,
+    "h264": { "tune": "zerolatency", "preset": "ultrafast" }
+  },
+  "player": {
+    "liveSyncDurationCount": 2,
+    "liveMaxLatencyDurationCount": 4,
+    "backBufferLength": 0,
+    "lowLatencyMode": true
+  }
+}
+```
+
+:::info Bootstrap Guard
+The API routes for `GET /api/admin/settings` and `GET /api/internal/events/:id/stream-config` use upsert-or-return-hardcoded-defaults logic, so a missing `SystemSettings` row never causes a 500 error.
 :::
 
 ## Access Rules

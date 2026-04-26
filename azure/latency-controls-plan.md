@@ -1,5 +1,7 @@
 # Plan: Per-Event Stream Optimization Controls
 
+> **Implementation Status (April 26, 2026):** Phases 0–5 are **fully implemented and deployed** to Azure Container Apps. End-to-end latency reduced from ~20s to **8–10s**. Multi-codec expansion (Phase 6) remains future work.
+
 Expose all latency optimizations from Live-Stream-Latency-Breakdown.md as configurable per-event settings in the StreamGate admin UI, with system-wide defaults and a multi-codec extensible architecture.
 
 ## Decisions

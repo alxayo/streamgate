@@ -60,6 +60,7 @@ StreamGate is a **ticket-gated video streaming platform** composed of two indepe
 | Browser | Platform App | HTTPS (REST) | Token validation, JWT issuance/refresh, heartbeat, session release |
 | Browser | HLS Server | HTTPS (HLS) | Stream manifest (.m3u8) and segment (.ts) requests with JWT Bearer |
 | HLS Server | Platform App | HTTP (REST) | Poll `GET /api/revocations?since=` every 30s for revoked tokens and deactivated events |
+| HLS Transcoder | Platform App | HTTP (REST) | Fetch stream config on `publish_start` via `GET /api/internal/events/:id/stream-config`; cache system defaults via `GET /api/internal/stream-config/defaults` |
 | Platform App | HLS Server | HTTP (HEAD) | Stream probing — check if a stream is live using a short-lived probe JWT |
 | Admin Browser | Platform App | HTTPS (REST) | Event/token CRUD via `/api/admin/*` with session cookie auth |
 

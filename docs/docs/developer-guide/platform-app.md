@@ -16,13 +16,15 @@ The Platform App is a **Next.js 14+** application serving three roles:
 ```
 platform/
 ├── prisma/
-│   └── schema.prisma          # Database schema (Event, Token, ActiveSession)
+│   └── schema.prisma          # Database schema (Event, Token, ActiveSession, SystemSettings)
 ├── src/
 │   ├── app/                   # Next.js App Router
 │   │   ├── page.tsx           # Viewer Portal entry page
 │   │   ├── layout.tsx         # Root layout
 │   │   ├── globals.css        # Tailwind CSS + global styles
 │   │   ├── admin/             # Admin Console pages
+│   │   │   ├── settings/      # System-wide stream settings page
+│   │   │   └── events/[id]/   # Event detail with ingest + config cards
 │   │   └── api/               # API Routes
 │   │       ├── admin/         # Admin CRUD endpoints (session auth required)
 │   │       │   ├── login/     # POST — admin login
@@ -30,18 +32,23 @@ platform/
 │   │       │   ├── session/   # GET — check admin session
 │   │       │   ├── events/    # GET/POST + /:id (GET/PUT/DELETE + actions)
 │   │       │   ├── tokens/    # GET, PATCH /:id/revoke|unrevoke, bulk-revoke
+│   │       │   ├── settings/  # GET/PUT — system-wide stream defaults
 │   │       │   └── dashboard/ # GET — dashboard stats
+│   │       ├── internal/      # Internal endpoints (X-Internal-Api-Key auth)
+│   │       │   ├── stream-config/defaults/ # GET — system defaults for transcoder
+│   │       │   └── events/[id]/stream-config/ # GET — per-event merged config
 │   │       ├── tokens/        # POST /validate — public token validation
 │   │       ├── playback/      # JWT refresh, heartbeat, release
 │   │       ├── events/        # GET /:id/status — public event status
+│   │       ├── rtmp/          # POST /auth — RTMP publish callback
 │   │       └── revocations/   # GET ?since= — internal (HLS server polling)
 │   ├── components/
-│   │   ├── ui/                # 9 shadcn/ui components
-│   │   ├── player/            # 9 video player components
-│   │   ├── admin/             # 6 admin components
-│   │   └── viewer/            # 5 viewer flow components
-│   ├── hooks/                 # 6 custom React hooks
-│   ├── lib/                   # 10 utility modules
+│   │   ├── ui/                # shadcn/ui components
+│   │   ├── player/            # Video player components
+│   │   ├── admin/             # Admin components (event-form, settings-page)
+│   │   └── viewer/            # Viewer flow components
+│   ├── hooks/                 # Custom React hooks
+│   ├── lib/                   # Utility modules (incl. stream-config merge/validation)
 │   └── generated/prisma/      # Prisma client (auto-generated)
 ├── package.json
 └── tsconfig.json
@@ -105,17 +112,28 @@ All admin endpoints require an `iron-session` cookie set by `/api/admin/login`:
 | `GET` | `/api/admin/events/:id/tokens` | List tokens for event |
 | `POST` | `/api/admin/events/:id/tokens` | Generate tokens for event |
 | `GET` | `/api/admin/events/:id/tokens/export` | Export tokens as CSV |
+| `GET` | `/api/admin/events/:id/stream-config` | Get effective stream config + ingest endpoints |
 | `GET` | `/api/admin/tokens` | List all tokens (with filters) |
 | `PATCH` | `/api/admin/tokens/:id/revoke` | Revoke a token |
 | `PATCH` | `/api/admin/tokens/:id/unrevoke` | Unrevoke a token |
 | `POST` | `/api/admin/tokens/bulk-revoke` | Bulk revoke tokens |
 | `GET` | `/api/admin/dashboard` | Dashboard statistics |
+| `GET` | `/api/admin/settings` | Get system-wide stream defaults |
+| `PUT` | `/api/admin/settings` | Update system-wide stream defaults |
 
-### Internal Endpoint
+### Internal Endpoints
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | `GET` | `/api/revocations?since=` | `X-Internal-Api-Key` header | Returns revocations and event deactivations since timestamp |
+| `GET` | `/api/internal/stream-config/defaults` | `X-Internal-Api-Key` header | Returns system-wide transcoder and player defaults |
+| `GET` | `/api/internal/events/:id/stream-config` | `X-Internal-Api-Key` header | Returns merged per-event transcoder + player config |
+
+### RTMP Callback
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `POST` | `/api/rtmp/auth` | `RTMP_AUTH_TOKEN` in body | Validates RTMP publish requests against event UUIDs |
 
 ### Response Format
 

@@ -44,6 +44,7 @@ export * from './types';
 export * from './constants';
 export * from './jwt';
 export * from './validation';
+export * from './stream-config';
 ```
 
 ## TypeScript Interfaces
@@ -132,6 +133,7 @@ export interface TokenValidationResponse {
   streamPath: string;        // e.g., "/streams/evt-uuid/"
   expiresAt: string;         // ISO 8601 token expiry
   tokenExpiresIn: number;    // Seconds until JWT expires
+  playerConfig?: PlayerConfig; // Merged player settings for hls.js (optional)
 }
 
 /** JWT refresh response */
@@ -169,6 +171,59 @@ export interface ApiErrorResponse {
   error: string;
 }
 ```
+
+## Stream Configuration Types
+
+Defined in `shared/src/stream-config.ts`, these types control how each live event is encoded (transcoder settings) and how the viewer's player behaves (player settings). The Go HLS transcoder maintains matching struct definitions in `config_types.go`.
+
+### TranscoderConfig
+
+```typescript
+export interface TranscoderConfig {
+  codecs: CodecName[];          // ['h264'] — extensible to 'av1', 'vp9'
+  profile: RenderProfileName;   // Rendition preset name
+  hlsTime: number;              // Segment duration in seconds (default: 2)
+  hlsListSize: number;          // Playlist window segment count (default: 6)
+  forceKeyFrameInterval: number; // Seconds between forced keyframes (default: 2)
+  h264: H264Config;             // H.264-specific settings
+  av1?: AV1Config;              // Future: AV1 settings
+  vp9?: VP9Config;              // Future: VP9 settings
+}
+```
+
+### PlayerConfig
+
+```typescript
+export interface PlayerConfig {
+  liveSyncDurationCount: number;      // Segments behind live edge (default: 2)
+  liveMaxLatencyDurationCount: number; // Max segments before catch-up (default: 4)
+  backBufferLength: number;           // Seconds of rewind buffer (0 or -1 for Infinity)
+  lowLatencyMode: boolean;            // Enable hls.js low-latency mode (default: true)
+}
+```
+
+### Render Profiles
+
+The `RENDER_PROFILES` constant maps profile names to fixed rendition lists:
+
+| Profile | Renditions | Use Case |
+|---------|-----------|----------|
+| `passthrough-only` | 1080p copy | Minimal CPU, source quality only |
+| `low-latency-720p-480p` | 720p + 480p (transcoded) | Low-latency, consistent keyframes |
+| `low-latency-1080p-720p-480p` | 1080p + 720p + 480p (all transcoded) | Full keyframe control |
+| `full-abr-1080p-720p-480p` | 1080p copy + 720p + 480p (transcoded) | Default — balanced CPU + ABR |
+
+### Defaults
+
+```typescript
+export const SYSTEM_DEFAULTS: { transcoder: TranscoderConfig; player: PlayerConfig }
+export const DEFAULT_TRANSCODER_CONFIG: TranscoderConfig
+export const DEFAULT_PLAYER_CONFIG: PlayerConfig
+```
+
+:::info Cross-Repo Contract
+The Go transcoder (`rtmp-go/azure/hls-transcoder/config_types.go`) maintains matching struct definitions. Both must stay in sync — the TypeScript types in this package are the source of truth.
+:::
 
 ## Constants
 

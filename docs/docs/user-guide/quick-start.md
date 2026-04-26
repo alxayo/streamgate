@@ -113,9 +113,14 @@ Wait for both services to show "ready" messages before proceeding.
    - **Ends At**: Set to a few hours from now
    - Leave other fields at their defaults
 5. Save the event — note the **Event ID** (UUID) shown on the event detail page
-6. Click **"Generate Tokens"**
-7. Generate 1 or more tokens
-8. **Copy one of the token codes** (12-character alphanumeric string)
+6. On the event detail page, find the **Ingest Endpoints** card with copy-ready RTMP URLs (if an RTMP server is configured) and the **Stream Configuration** card showing the effective transcoder/player settings
+7. Click **"Generate Tokens"**
+8. Generate 1 or more tokens
+9. **Copy one of the token codes** (12-character alphanumeric string)
+
+:::tip Stream Settings
+For live events, you can customize transcoder and player settings under **Advanced Stream Settings** in the event edit form, or configure system-wide defaults at `/admin/settings`. Settings include segment duration, rendition profile, H.264 tuning, and hls.js player buffer behavior.
+:::
 
 ## Step 6: Start Streaming with FFmpeg
 
