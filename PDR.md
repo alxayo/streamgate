@@ -161,7 +161,7 @@ The JWT approach provides sub-millisecond validation, zero database load from se
 | Video (client) | hls.js (HLS adaptive streaming) | Platform App (browser) |
 | Backend / API | Next.js API Routes (REST) | Platform App |
 | Database | SQLite via Prisma ORM (dev); PostgreSQL (prod) | Platform App |
-| Auth (Admin) | bcrypt-hashed password, HTTP-only session cookie | Platform App |
+| Auth (Admin) | Multi-user accounts with TOTP 2FA, RBAC, iron-session cookies | Platform App |
 | Token Generation | Node.js `crypto.randomBytes`, base62, 12 chars | Platform App |
 | JWT Library | `jose` (lightweight, standards-compliant) | Platform App + HLS Server |
 | HLS Server Framework | Express.js (TypeScript) | HLS Media Server |
@@ -432,17 +432,32 @@ If the event has ended but the token is still within the access window:
 
 ### 8.1 Admin Authentication
 
-- **Method**: Password-based login (single shared admin password stored as a hashed environment variable)
-- **Route**: `/admin` — serves a login form; on success, sets an HTTP-only secure session cookie
-- **Session**: Encrypted cookie (stateless) using `iron-session` or equivalent. No server-side session store required. Cookie expiry default: 8 hours. Compatible with serverless deployments (e.g., Vercel).
-- **Future upgrade path**: Replace with NextAuth.js + OAuth provider for multi-user admin
+- **Method**: Multi-user accounts with username/password + mandatory TOTP two-factor authentication
+- **Storage**: Admin user accounts (username, bcrypt password hash, encrypted TOTP secret, role) stored in the database (`AdminUser` model)
+- **Roles**: Role-Based Access Control (RBAC) with three levels:
+  - `super_admin` — Full system access: user management, settings, all operations
+  - `admin` — Event/token management, settings access, dashboard
+  - `operator` — Read-only dashboard access
+- **Login flow**:
+  1. User submits username + password → server verifies bcrypt hash → returns a short-lived login token (JWT, 5-minute expiry)
+  2. User submits login token + 6-digit TOTP code → server decrypts stored TOTP secret, validates code → creates full session
+  3. Alternative: User submits login token + one-time recovery code → server marks code as used → creates full session
+- **Session**: Encrypted cookie using `iron-session`. Cookie is HTTP-only, Secure (production), SameSite=Strict. Session contains `userId`, `username`, and `role`. Cookie expiry default: 8 hours.
+- **2FA setup**: On first login (or after 2FA reset), user is redirected to `/admin/setup-2fa` where they scan a QR code, confirm with a valid TOTP code, and receive 8 one-time recovery codes
+- **Emergency access**: Super admins can bypass 2FA using the `ADMIN_SESSION_SECRET` as an emergency key (rate-limited to 3 attempts/hour)
+- **First boot**: If no admin users exist in the database, a default `super_admin` user is auto-seeded using the `ADMIN_PASSWORD_HASH` environment variable for backward compatibility
+- **Audit logging**: All authentication events (login success/failure, 2FA verification, recovery code use, session creation/destruction) are logged to an immutable `AuditLog` table with actor, action, IP, and user-agent
 
 ### 8.2 Admin Dashboard
 
-- **Layout**: Sidebar navigation + main content area (light theme for readability)
+- **Layout**: Sidebar navigation (permission-aware — items hidden based on user's role) + main content area (light theme for readability)
 - **Navigation sections**:
-  - **Events** — List, create, edit, deactivate streaming events
-  - **Tokens** — Generate, list, search, revoke, export tokens
+  - **Dashboard** — Summary cards and statistics (all roles)
+  - **Events** — List, create, edit, deactivate streaming events (admin+)
+  - **Tokens** — Generate, list, search, revoke, export tokens (admin+)
+  - **Users** — Create, edit, deactivate admin accounts, reset 2FA (super_admin only)
+  - **Audit Log** — View immutable history of all admin actions (super_admin only)
+  - **Settings** — System-wide stream configuration (admin+)
 - **Dashboard summary cards** (home view):
   - Total active events
   - Total tokens generated (with breakdown: unused / redeemed / expired / revoked)
@@ -715,8 +730,21 @@ This endpoint requires a valid access code to prevent event ID enumeration. It i
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/admin/login` | Authenticate admin (body: `{ password }`) |
-| POST | `/api/admin/logout` | End admin session |
+| POST | `/api/admin/login` | Authenticate admin (body: `{ username, password }`) → returns login token |
+| POST | `/api/admin/verify-2fa` | Verify TOTP code (body: `{ loginToken, code }`) → creates session |
+| POST | `/api/admin/verify-recovery` | Verify recovery code (body: `{ loginToken, recoveryCode }`) → creates session |
+| POST | `/api/admin/emergency-login` | Emergency bypass for super_admin (body: `{ username, password, emergencyKey }`) |
+| GET | `/api/admin/session` | Get current session status (userId, username, role, permissions) |
+| DELETE | `/api/admin/session` | Destroy session (logout) |
+| POST | `/api/admin/2fa/setup` | Generate TOTP secret + QR code URI |
+| POST | `/api/admin/2fa/confirm` | Confirm 2FA setup with valid code → returns recovery codes |
+| POST | `/api/admin/2fa/reset` | Reset another user's 2FA (super_admin only) |
+| GET | `/api/admin/users` | List all admin users (super_admin only) |
+| POST | `/api/admin/users` | Create admin user (super_admin only) |
+| GET | `/api/admin/users/:id` | Get user details (super_admin only) |
+| PATCH | `/api/admin/users/:id` | Update user (role, status, password) (super_admin only) |
+| DELETE | `/api/admin/users/:id` | Deactivate user (super_admin only) |
+| GET | `/api/admin/audit-log` | Query audit log entries (super_admin only) |
 | GET | `/api/admin/events` | List all events (with filters, pagination) |
 | POST | `/api/admin/events` | Create a new event |
 | GET | `/api/admin/events/:id` | Get event details |
@@ -811,7 +839,7 @@ Authentication: This endpoint is protected with a shared API key (`X-Internal-Ap
    - Path-scoped: JWT `sp` claim restricts access to a specific stream path, preventing one JWT from accessing another event’s content
    - Refresh-gated: JWT refresh requires the current JWT as Bearer auth (not just an access code), re-validates against the database, so revoked/expired access codes cannot obtain new JWTs. This also prevents the refresh endpoint from being used as an alternative validation endpoint.
 4. **Revocation speed**: Maximum 30-second delay between admin revoking a token (or deactivating an event) and the HLS server blocking requests, via the revocation cache sync which includes both individual revocations and event deactivations. JWT expiry provides a hard 1-hour backstop regardless.
-5. **Admin authentication**: Admin password is stored as a bcrypt hash in environment variables. Session cookies are HTTP-only, Secure, SameSite=Strict.
+5. **Admin authentication**: Multi-user accounts with bcrypt password hashes stored in the database. Mandatory TOTP two-factor authentication with encrypted secrets (AES-256-GCM). Role-based access control (super_admin/admin/operator). Session cookies are HTTP-only, Secure, SameSite=Strict. All admin actions logged to an immutable audit trail.
 6. **Internal API security**: The `/api/revocations` endpoint (called by HLS server) is protected with a shared API key (`X-Internal-Api-Key` header), not exposed publicly.
 7. **Rate limiting**: Applied to token validation endpoint (5/min per IP), playback refresh (12/hour per token code), and admin login (10/min per IP).
 8. **Input sanitization**: All user inputs (token codes, event fields) are validated and sanitized server-side. Token codes are alphanumeric only (reject any non-alphanumeric characters).
@@ -1033,7 +1061,7 @@ The following are explicitly **not** included in this version but noted as poten
 - Multi-language / i18n support
 - Analytics dashboard (viewer count, watch duration, geographic data)
 - DRM (Digital Rights Management) — relies on JWT validation and token expiry for access control
-- Multi-admin roles and permissions — single admin password for v1
+- Multi-tenant admin organizations — all admin users share one instance
 - Payment / ticketing integration — tokens are generated manually by admin
 - Stream ingestion/transcoding — streams are provided as pre-existing HLS files or upstream origins
 - CDN integration — the HLS Media Server serves content directly; a CDN layer can be added in front with JWT pass-through
@@ -1052,7 +1080,8 @@ The platform consists of two independently deployable services that share a sign
 - **Database**: SQLite file for development and small-scale; PostgreSQL (via Prisma migration) for production scale
 - **Port**: Default `3000` (configurable)
 - **Environment Variables**:
-  - `ADMIN_PASSWORD_HASH` — bcrypt hash of the admin password
+  - `ADMIN_PASSWORD_HASH` — bcrypt hash of the initial super_admin password (used only for first-boot seeding)
+  - `ADMIN_SESSION_SECRET` — Secret key for iron-session encryption and TOTP secret encryption (min 32 chars)
   - `PLAYBACK_SIGNING_SECRET` — HMAC secret for JWT playback tokens (**must match** HLS server)
   - `INTERNAL_API_KEY` — API key for the `/api/revocations` endpoint
   - `DATABASE_URL` — Database connection string
