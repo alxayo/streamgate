@@ -5,7 +5,7 @@ title: Data Model
 
 # Data Model
 
-StreamGate uses **Prisma ORM** with four core models: `Event`, `Token`, `ActiveSession`, and `SystemSettings`. The schema is defined in `platform/prisma/schema.prisma`.
+StreamGate uses **Prisma ORM** with seven models: `Event`, `Token`, `ActiveSession`, `SystemSettings`, `AdminUser`, `RecoveryCode`, and `AuditLog`. The schema is defined in `platform/prisma/schema.prisma`.
 
 ## Entity Relationship Diagram
 
@@ -68,11 +68,44 @@ StreamGate uses **Prisma ORM** with four core models: `Event`, `Token`, `ActiveS
 │  playerDefaults    String (JSON)    │
 │  updatedAt         DateTime (auto)  │
 └─────────────────────────────────────┘
+
+┌─────────────────────────────────────┐
+│            AdminUser                │
+│─────────────────────────────────────│
+│  id              String  (PK, UUID) │
+│  visibleId       Int (UNIQUE, auto) │
+│  username        String  (UNIQUE)   │
+│  passwordHash    String             │
+│  role            String             │
+│  totpSecret      String?            │
+│  twoFactorEnabled Boolean (def F)   │
+│  twoFactorVerified Boolean (def F)  │
+│  isActive        Boolean (def T)    │
+│  lastLoginAt     DateTime?          │
+│  createdAt       DateTime (auto)    │
+│  updatedAt       DateTime (auto)    │
+└─────────────┬──────────┬────────────┘
+              │ 1:N      │ 1:N
+              │          │
+┌─────────────▼──────┐  ┌▼────────────────────────────┐
+│   RecoveryCode     │  │         AuditLog            │
+│────────────────────│  │─────────────────────────────│
+│  id     String(PK) │  │  id        String (PK,UUID) │
+│  userId String(FK) │  │  userId    String? (FK)     │
+│  codeHash String   │  │  username  String           │
+│  usedAt DateTime?  │  │  action    String           │
+│  createdAt DateTime│  │  resource  String?          │
+└────────────────────┘  │  ipAddress String?          │
+                        │  userAgent  String?          │
+                        │  createdAt  DateTime (auto)  │
+                        └──────────────────────────────┘
 ```
 
 **Relationships:**
 - An **Event** has many **Tokens** (one-to-many, cascade delete)
 - A **Token** has many **ActiveSessions** (one-to-many, cascade delete)
+- An **AdminUser** has many **RecoveryCodes** (one-to-many, cascade delete)
+- An **AdminUser** has many **AuditLog** entries (one-to-many, set null on delete)
 - In practice, single-device enforcement means at most one ActiveSession per Token at any given time
 
 ## Event Model
@@ -375,6 +408,95 @@ model ActiveSession {
 | `ActiveSession` | `sessionId` (unique) | Fast session lookup during heartbeat/release |
 | `ActiveSession` | `tokenId` | Fast check for existing sessions per token |
 | `ActiveSession` | `lastHeartbeat` | Fast identification of stale sessions |
+| `AdminUser` | `username` (unique) | Fast login lookup |
+| `AdminUser` | `visibleId` (unique) | Human-readable user identifier |
+| `RecoveryCode` | `userId` | Fast lookup of codes per user |
+| `AuditLog` | `userId` | Filter entries by actor |
+| `AuditLog` | `createdAt` | Chronological queries and pagination |
+
+## AdminUser Model
+
+An admin user account with credentials, TOTP secret, and role assignment.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `String` | UUID (auto) | Primary key |
+| `visibleId` | `Int` | Auto-increment | Human-readable ID shown in UI |
+| `username` | `String` | — | Unique login username |
+| `passwordHash` | `String` | — | Bcrypt hash (cost factor 12) |
+| `role` | `String` | `"operator"` | One of: `super_admin`, `admin`, `operator` |
+| `totpSecret` | `String?` | `null` | AES-256-GCM encrypted TOTP secret (null if 2FA not set up) |
+| `twoFactorEnabled` | `Boolean` | `false` | Whether 2FA setup has been initiated |
+| `twoFactorVerified` | `Boolean` | `false` | Whether 2FA setup has been confirmed with a valid code |
+| `isActive` | `Boolean` | `true` | Whether the account can log in (soft-delete pattern) |
+| `lastLoginAt` | `DateTime?` | `null` | Timestamp of most recent successful login |
+| `createdAt` | `DateTime` | `now()` | Account creation timestamp |
+| `updatedAt` | `DateTime` | auto | Last modification timestamp |
+
+### Role Hierarchy
+
+```
+super_admin → All permissions (user management, audit log, settings, events, tokens, dashboard)
+admin       → Events, tokens, settings, dashboard
+operator    → Dashboard (read-only)
+```
+
+:::info First-boot seeding
+On first server start, if no `AdminUser` records exist, a default `super_admin` user named `admin` is created using the `ADMIN_PASSWORD_HASH` environment variable. This user must complete 2FA setup on first login.
+:::
+
+## RecoveryCode Model
+
+One-time backup codes for two-factor authentication recovery.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `String` | UUID (auto) | Primary key |
+| `userId` | `String` | — | FK → AdminUser |
+| `codeHash` | `String` | — | Bcrypt hash of the recovery code |
+| `usedAt` | `DateTime?` | `null` | When the code was consumed (null = unused) |
+| `createdAt` | `DateTime` | `now()` | Generation timestamp |
+
+- 8 codes are generated during 2FA setup confirmation
+- Each code is 8-character alphanumeric (base62)
+- Codes are hashed with bcrypt before storage — plaintext shown only once during setup
+- Using a code marks it with `usedAt` timestamp — it cannot be reused
+- All codes cascade-delete when the parent AdminUser is deleted
+
+## AuditLog Model
+
+Immutable append-only log of all admin actions for forensic auditing.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `String` | UUID (auto) | Primary key |
+| `userId` | `String?` | — | FK → AdminUser (nullable for system events) |
+| `username` | `String` | — | Actor's username (denormalized for query performance) |
+| `action` | `String` | — | Action type identifier |
+| `resource` | `String?` | `null` | Target of the action (e.g., affected username, event ID) |
+| `ipAddress` | `String?` | `null` | Client IP address |
+| `userAgent` | `String?` | `null` | Browser user-agent string |
+| `createdAt` | `DateTime` | `now()` | Timestamp (never modified) |
+
+### Action Types
+
+| Action | Description |
+|--------|-------------|
+| `login_success` | Successful password verification |
+| `login_failed` | Failed login attempt |
+| `two_factor_verified` | TOTP code verified successfully |
+| `recovery_code_used` | Recovery code consumed |
+| `emergency_login` | Emergency bypass login |
+| `logout` | Session destroyed |
+| `two_factor_setup_complete` | 2FA enrollment confirmed |
+| `2fa_reset` | Another user's 2FA was reset |
+| `user_created` | New admin user created |
+| `user_updated` | Admin user fields modified |
+| `user_deactivated` | Admin user account disabled |
+
+:::note Immutability
+Audit log entries can never be modified or deleted through the application. They provide a tamper-evident trail for security investigations.
+:::
 
 ## Migration Workflow
 

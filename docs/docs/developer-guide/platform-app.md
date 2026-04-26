@@ -16,20 +16,29 @@ The Platform App is a **Next.js 14+** application serving three roles:
 ```
 platform/
 ├── prisma/
-│   └── schema.prisma          # Database schema (Event, Token, ActiveSession, SystemSettings)
+│   └── schema.prisma          # Database schema (Event, Token, ActiveSession, SystemSettings, AdminUser, RecoveryCode, AuditLog)
 ├── src/
 │   ├── app/                   # Next.js App Router
 │   │   ├── page.tsx           # Viewer Portal entry page
 │   │   ├── layout.tsx         # Root layout
 │   │   ├── globals.css        # Tailwind CSS + global styles
 │   │   ├── admin/             # Admin Console pages
+│   │   │   ├── layout.tsx     # Admin layout with permission-aware sidebar
+│   │   │   ├── setup-2fa/     # TOTP enrollment wizard (4-step)
+│   │   │   ├── users/         # User management (list, create, edit)
+│   │   │   ├── audit-log/     # Audit log viewer with filters
 │   │   │   ├── settings/      # System-wide stream settings page
 │   │   │   └── events/[id]/   # Event detail with ingest + config cards
 │   │   └── api/               # API Routes
 │   │       ├── admin/         # Admin CRUD endpoints (session auth required)
-│   │       │   ├── login/     # POST — admin login
-│   │       │   ├── logout/    # POST — admin logout
-│   │       │   ├── session/   # GET — check admin session
+│   │       │   ├── login/     # POST — username/password → login token
+│   │       │   ├── verify-2fa/    # POST — login token + TOTP code → session
+│   │       │   ├── verify-recovery/ # POST — login token + recovery code → session
+│   │       │   ├── emergency-login/ # POST — super_admin bypass (rate-limited)
+│   │       │   ├── session/   # GET — session status + permissions, DELETE — logout
+│   │       │   ├── 2fa/       # POST setup, confirm, reset
+│   │       │   ├── users/     # GET/POST + /:id (GET/PATCH/DELETE) — user CRUD
+│   │       │   ├── audit-log/ # GET — paginated audit log query
 │   │       │   ├── events/    # GET/POST + /:id (GET/PUT/DELETE + actions)
 │   │       │   ├── tokens/    # GET, PATCH /:id/revoke|unrevoke, bulk-revoke
 │   │       │   ├── settings/  # GET/PUT — system-wide stream defaults
@@ -45,10 +54,16 @@ platform/
 │   ├── components/
 │   │   ├── ui/                # shadcn/ui components
 │   │   ├── player/            # Video player components
-│   │   ├── admin/             # Admin components (event-form, settings-page)
+│   │   ├── admin/             # Admin components (login-form, admin-sidebar, event-form, settings-page)
 │   │   └── viewer/            # Viewer flow components
 │   ├── hooks/                 # Custom React hooks
-│   ├── lib/                   # Utility modules (incl. stream-config merge/validation)
+│   ├── lib/                   # Utility modules
+│   │   ├── admin-session.ts   # iron-session config (dual-mode: full + pending-2FA)
+│   │   ├── permissions.ts     # RBAC permission matrix and helpers
+│   │   ├── require-permission.ts # API route permission guard
+│   │   ├── totp-crypto.ts    # AES-256-GCM encrypt/decrypt for TOTP secrets
+│   │   ├── admin-seed.ts     # First-boot super_admin seeding
+│   │   └── env.ts            # Environment variable accessors
 │   └── generated/prisma/      # Prisma client (auto-generated)
 ├── package.json
 └── tsconfig.json
@@ -93,13 +108,25 @@ These require no authentication — they are accessed by viewers:
 
 ### Admin Endpoints
 
-All admin endpoints require an `iron-session` cookie set by `/api/admin/login`:
+All admin endpoints require an `iron-session` cookie set after completing two-factor authentication:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/api/admin/login` | Authenticate with password |
-| `POST` | `/api/admin/logout` | Destroy admin session |
-| `GET` | `/api/admin/session` | Check if admin is authenticated |
+| `POST` | `/api/admin/login` | Verify credentials → return login token |
+| `POST` | `/api/admin/verify-2fa` | Verify TOTP code → create session |
+| `POST` | `/api/admin/verify-recovery` | Verify recovery code → create session |
+| `POST` | `/api/admin/emergency-login` | Emergency super_admin bypass |
+| `GET` | `/api/admin/session` | Get session status + permissions |
+| `DELETE` | `/api/admin/session` | Destroy session (logout) |
+| `POST` | `/api/admin/2fa/setup` | Generate TOTP secret + QR URI |
+| `POST` | `/api/admin/2fa/confirm` | Confirm 2FA → return recovery codes |
+| `POST` | `/api/admin/2fa/reset` | Reset another user's 2FA (super_admin) |
+| `GET` | `/api/admin/users` | List admin users (super_admin) |
+| `POST` | `/api/admin/users` | Create admin user (super_admin) |
+| `GET` | `/api/admin/users/:id` | Get user details (super_admin) |
+| `PATCH` | `/api/admin/users/:id` | Update user (super_admin) |
+| `DELETE` | `/api/admin/users/:id` | Deactivate user (super_admin) |
+| `GET` | `/api/admin/audit-log` | Query audit log (super_admin) |
 | `GET` | `/api/admin/events` | List all events |
 | `POST` | `/api/admin/events` | Create event |
 | `GET` | `/api/admin/events/:id` | Get event details |

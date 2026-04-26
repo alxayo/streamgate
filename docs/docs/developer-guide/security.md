@@ -132,22 +132,64 @@ For immediate emergency revocation, deploy to multiple HLS instances with shorte
 
 ## Admin Authentication
 
-### Password Storage
+### Multi-User Accounts
 
-Admin password is stored as a **bcrypt hash** in the `ADMIN_PASSWORD_HASH` environment variable:
+Admin authentication uses a multi-user system with mandatory TOTP two-factor authentication and role-based access control (RBAC).
 
-```bash
-# Generate a hash
-node -e "const bcrypt = require('bcrypt'); bcrypt.hash('your-password', 12).then(console.log)"
+**User accounts** are stored in the `AdminUser` database table with:
+- Username (unique)
+- Bcrypt password hash (cost factor 12)
+- Encrypted TOTP secret (AES-256-GCM, key derived from `ADMIN_SESSION_SECRET`)
+- Role (`super_admin`, `admin`, or `operator`)
+- Account status flags (`isActive`, `twoFactorEnabled`, `twoFactorVerified`)
+
+### Authentication Flow
+
+Login is a two-step process to prevent session fixation:
+
+```
+Step 1: Username + Password → Login Token (JWT, 5-minute expiry)
+Step 2: Login Token + TOTP Code → Full Session (iron-session cookie)
 ```
 
-- **Algorithm**: bcrypt with cost factor 12
-- **Storage**: Environment variable (not in database)
-- **Comparison**: `bcrypt.compare()` during login
+1. **Password verification**: User submits username + password. Server verifies bcrypt hash and returns a short-lived JWT (`loginToken`) containing only the user ID. No session is created yet.
+2. **TOTP verification**: User submits the login token + 6-digit TOTP code. Server decrypts the stored TOTP secret, validates the code (±1 period tolerance for clock skew), and creates a full session.
+3. **Alternative — Recovery code**: Instead of TOTP, user can submit one of their 8 one-time recovery codes (bcrypt-hashed, marked as used on consumption).
+
+### TOTP Two-Factor Authentication
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| Algorithm | SHA-1 | Google Authenticator compatibility |
+| Period | 30 seconds | RFC 6238 standard |
+| Digits | 6 | Standard TOTP length |
+| Tolerance | ±1 period | Handles clock skew (accepts previous/next code) |
+| Secret storage | AES-256-GCM encrypted in database | Protects against DB breach |
+| Recovery codes | 8 codes, 8-char alphanumeric, bcrypt-hashed | One-time use backup |
+
+:::warning TOTP Secret Encryption
+TOTP secrets are encrypted at rest using AES-256-GCM with a key derived from `ADMIN_SESSION_SECRET`. If this secret is rotated, all users must re-enroll 2FA. Back up this value securely.
+:::
+
+### Role-Based Access Control (RBAC)
+
+Three roles with hierarchical permissions:
+
+| Permission | Super Admin | Admin | Operator |
+|-----------|:-----------:|:-----:|:--------:|
+| `dashboard:view` | ✅ | ✅ | ✅ |
+| `events:view` | ✅ | ✅ | ❌ |
+| `events:manage` | ✅ | ✅ | ❌ |
+| `tokens:manage` | ✅ | ✅ | ❌ |
+| `settings:manage` | ✅ | ✅ | ❌ |
+| `users:manage` | ✅ | ❌ | ❌ |
+| `audit:view` | ✅ | ❌ | ❌ |
+
+Permission checks are enforced server-side in every API route via `checkPermission()`. The sidebar UI also hides items the user cannot access.
 
 ### Session Cookies
 
-After successful login, `iron-session` creates an encrypted HTTP-only cookie:
+After successful two-factor authentication, `iron-session` creates an encrypted HTTP-only cookie:
 
 | Cookie Attribute | Value | Purpose |
 |------------------|-------|---------|
@@ -156,9 +198,34 @@ After successful login, `iron-session` creates an encrypted HTTP-only cookie:
 | `sameSite` | `strict` | Prevents CSRF attacks |
 | `maxAge` | 28800 (8 hours) | Auto-expire after 8 hours |
 
+Session data contains `userId`, `username`, and `role`. No sensitive data (passwords, TOTP secrets) is stored in the session.
+
 :::warning
-The cookie is encrypted with `iron-session`'s seal/unseal mechanism. The encryption key is derived from the application's session secret. Never expose this secret.
+The cookie is encrypted with `iron-session`'s seal/unseal mechanism using `ADMIN_SESSION_SECRET`. Never expose this secret. Rotating it invalidates all active sessions.
 :::
+
+### Audit Logging
+
+All admin actions are logged to an immutable `AuditLog` table:
+
+| Field | Description |
+|-------|-------------|
+| `userId` | Actor's user ID |
+| `username` | Actor's username (denormalized for query efficiency) |
+| `action` | Action type (e.g., `login_success`, `user_created`, `2fa_reset`) |
+| `resource` | Target of the action (e.g., affected username or event ID) |
+| `ipAddress` | Client IP address |
+| `userAgent` | Browser user-agent string |
+| `createdAt` | Timestamp |
+
+Audit entries are append-only — they can never be modified or deleted.
+
+### First-Boot Seeding
+
+On first server start, if no `AdminUser` records exist, a default `super_admin` user is created using:
+- Username: `admin`
+- Password: from `ADMIN_PASSWORD_HASH` environment variable
+- 2FA: Not yet enabled (user completes setup on first login)
 
 ## Internal API Security
 
@@ -208,10 +275,21 @@ Prevents abuse of the refresh endpoint. Normal usage is 1 refresh per 50 minutes
 |---------|-------|
 | Endpoint | `POST /api/admin/login` |
 | Key | Client IP address |
-| Limit | 10 requests per 60 seconds |
+| Limit | 5 requests per 15 minutes per username |
 | Response (429) | `{ "error": "Too many login attempts" }` |
 
-Prevents admin password brute-forcing.
+Prevents admin password brute-forcing. Additional TOTP-specific rate limiting:
+
+### Emergency Login Limiter
+
+| Setting | Value |
+|---------|-------|
+| Endpoint | `POST /api/admin/emergency-login` |
+| Key | Client IP address |
+| Limit | 3 requests per 60 minutes |
+| Response (429) | `{ "error": "Too many emergency login attempts" }` |
+
+Stricter rate limit for the emergency bypass endpoint (super_admin only).
 
 :::note
 Rate limiters are in-memory (`Map`-based) and reset on server restart. In a horizontally scaled deployment, each instance maintains its own rate limit state. Consider using Redis-backed rate limiting for multi-instance deployments.

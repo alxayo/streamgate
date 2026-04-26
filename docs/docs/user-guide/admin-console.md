@@ -17,23 +17,96 @@ http://localhost:3000/admin
 
 ### Logging In
 
-Enter the admin password configured via the `ADMIN_PASSWORD_HASH` environment variable. The password is verified against a bcrypt hash — the plaintext password is never stored.
+StreamGate uses multi-step authentication with mandatory two-factor verification:
+
+1. **Enter your username and password** — The default super admin account is `admin` with the password set during initial setup
+2. **Enter your 6-digit TOTP code** — From your authenticator app (Google Authenticator, Authy, 1Password, etc.)
+3. **First-time setup** — On your first login, you'll be guided through a 4-step 2FA enrollment wizard
 
 :::info Session persistence
-After logging in, your session is maintained via an encrypted HTTP-only cookie (using `iron-session`). You'll stay logged in until you explicitly log out or the session cookie expires.
+After logging in, your session is maintained via an encrypted HTTP-only cookie (using `iron-session`). You'll stay logged in until you explicitly log out or the session cookie expires (8 hours).
 :::
 
-### Forgot Your Password?
+### First-Time 2FA Setup
 
-The admin password is set via environment variable, not stored in the database. To reset it:
+When logging in for the first time (or after a 2FA reset), you'll complete a setup wizard:
 
-```bash
-# Generate a new password hash
-npm run hash-password
+1. **Introduction** — Explains why 2FA is required
+2. **QR Code** — Scan with your authenticator app (or manually enter the secret key)
+3. **Verification** — Enter a 6-digit code to confirm your authenticator is working
+4. **Recovery Codes** — Save your 8 one-time recovery codes securely
 
-# Update ADMIN_PASSWORD_HASH in your .env file with the new hash
-# Restart the Platform App
-```
+:::danger Save your recovery codes!
+Recovery codes are shown **only once** during setup. Each code can be used exactly once to log in if you lose access to your authenticator app. Store them in a password manager or printed in a secure location.
+:::
+
+### Lost Access / Password Reset
+
+| Situation | Solution |
+|-----------|----------|
+| Lost authenticator app | Use a recovery code (click "Use recovery code" on login) |
+| Lost recovery codes too | Ask a Super Admin to reset your 2FA from the Users page |
+| Only admin & locked out | Use emergency login with `ADMIN_SESSION_SECRET` (see deployment guide) |
+| Forgot password | A Super Admin can update your password from the Users page |
+
+---
+
+## User Roles and Permissions
+
+StreamGate uses role-based access control (RBAC) with three levels:
+
+| Role | Description | Capabilities |
+|------|-------------|--------------|
+| **Super Admin** | Full system access | Everything + user management + audit log |
+| **Admin** | Event & token management | Events, tokens, settings, dashboard |
+| **Operator** | Read-only monitoring | Dashboard viewing only |
+
+The sidebar navigation automatically shows only the sections your role permits.
+
+---
+
+## User Management (Super Admin Only)
+
+Super Admins can create and manage admin user accounts:
+
+### Creating a User
+
+1. Navigate to **Users** in the sidebar
+2. Click **"Add User"**
+3. Fill in: username, password, and role
+4. Click **"Create"**
+
+The new user will be prompted to set up 2FA on their first login.
+
+### Managing Users
+
+From the Users page, you can:
+
+- **Edit** — Change username, role, or password
+- **Reset 2FA** — Forces the user to re-enroll 2FA on next login (useful if they lose their authenticator)
+- **Deactivate** — Disables the account (user cannot log in). Can be reactivated later.
+
+:::warning Safety guards
+You cannot deactivate your own account or change your own role — this prevents accidental lockouts.
+:::
+
+---
+
+## Audit Log (Super Admin Only)
+
+The audit log provides an immutable record of all admin actions:
+
+- **Login events** — Successful and failed login attempts
+- **User management** — Account creation, role changes, 2FA resets, deactivations
+- **Session events** — Logout, emergency login usage
+- **Content actions** — Event/token operations (when logged)
+
+### Filtering
+
+Filter the audit log by:
+- **Action type** — e.g., `login_success`, `user_created`, `2fa_reset`
+- **Username** — Filter by who performed the action
+- **Date range** — Show entries within a specific time window
 
 ---
 

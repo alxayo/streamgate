@@ -198,18 +198,47 @@ The `status` field is one of: `not-started`, `live`, `ended`, `recording`.
 
 ## Admin API
 
-All admin endpoints require an authenticated session via the `iron-session` cookie. Send credentials first via `/api/admin/login`.
+All admin endpoints require an authenticated session via the `iron-session` cookie. Authentication is a two-step process: password verification followed by TOTP 2FA.
 
 ### Authentication
 
 #### POST /api/admin/login
 
-**Rate limit:** 10 requests/minute per IP
+**Rate limit:** 5 requests/15 minutes per username
+
+Verifies username + password and returns a short-lived login token (JWT, 5-minute expiry). Does NOT create a session — the login token must be presented to `/api/admin/verify-2fa` or `/api/admin/verify-recovery` to complete authentication.
 
 ```bash
 curl -X POST http://localhost:3000/api/admin/login \
   -H "Content-Type: application/json" \
-  -d '{"password": "your-admin-password"}' \
+  -d '{"username": "admin", "password": "your-admin-password"}'
+```
+
+**Success (200):**
+```json
+{
+  "loginToken": "<short-lived-jwt>",
+  "requiresTwoFactor": true,
+  "twoFactorEnabled": true
+}
+```
+
+**Error:**
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `401` | Wrong credentials | `{ "error": "Invalid credentials" }` |
+| `403` | Account deactivated | `{ "error": "Account deactivated" }` |
+| `429` | Rate limited | `{ "error": "Too many login attempts" }` |
+
+#### POST /api/admin/verify-2fa
+
+Verifies TOTP code and creates a full session.
+
+```bash
+curl -X POST http://localhost:3000/api/admin/verify-2fa \
+  -H "Content-Type: application/json" \
+  -d '{"loginToken": "<jwt-from-login>", "code": "123456"}' \
   -c cookies.txt
 ```
 
@@ -219,26 +248,238 @@ curl -X POST http://localhost:3000/api/admin/login \
 
 | Status | Condition | Body |
 |--------|-----------|------|
-| `401` | Wrong password | `{ "error": "Invalid password" }` |
-| `429` | Rate limited | `{ "error": "Too many login attempts" }` |
+| `401` | Invalid/expired login token | `{ "error": "Invalid login token" }` |
+| `401` | Invalid TOTP code | `{ "error": "Invalid code" }` |
 
-#### POST /api/admin/logout
+#### POST /api/admin/verify-recovery
+
+Verifies a one-time recovery code and creates a full session.
 
 ```bash
-curl -X POST http://localhost:3000/api/admin/logout -b cookies.txt
+curl -X POST http://localhost:3000/api/admin/verify-recovery \
+  -H "Content-Type: application/json" \
+  -d '{"loginToken": "<jwt-from-login>", "recoveryCode": "Ab3kX9mQ"}' \
+  -c cookies.txt
 ```
 
-**Response (200):** `{ "success": true }`
+**Success (200):** `{ "success": true }`
+
+**Error:**
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `401` | Invalid recovery code | `{ "error": "Invalid recovery code" }` |
+
+#### POST /api/admin/emergency-login
+
+Emergency bypass for locked-out super_admin users. Requires the `ADMIN_SESSION_SECRET` value as the emergency key.
+
+**Rate limit:** 3 requests/hour per IP
+
+```bash
+curl -X POST http://localhost:3000/api/admin/emergency-login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "your-password", "emergencyKey": "<ADMIN_SESSION_SECRET>"}' \
+  -c cookies.txt
+```
+
+**Success (200):** `{ "success": true }`
 
 #### GET /api/admin/session
 
-Check if the current session is authenticated:
+Check current session status and permissions:
 
 ```bash
 curl http://localhost:3000/api/admin/session -b cookies.txt
 ```
 
-**Response (200):** `{ "authenticated": true }`
+**Response (200):**
+```json
+{
+  "authenticated": true,
+  "userId": "abc-123",
+  "username": "admin",
+  "role": "super_admin",
+  "permissions": ["dashboard:view", "events:view", "events:manage", "tokens:manage", "settings:manage", "users:manage", "audit:view"]
+}
+```
+
+#### DELETE /api/admin/session
+
+Destroy the session (logout):
+
+```bash
+curl -X DELETE http://localhost:3000/api/admin/session -b cookies.txt
+```
+
+**Response (200):** `{ "success": true }`
+
+---
+
+### Two-Factor Authentication Management
+
+#### POST /api/admin/2fa/setup
+
+Generate a new TOTP secret for the current user. Returns the `otpauth://` URI for QR code rendering and the raw secret for manual entry.
+
+```bash
+curl -X POST http://localhost:3000/api/admin/2fa/setup -b cookies.txt
+```
+
+**Response (200):**
+```json
+{
+  "uri": "otpauth://totp/StreamGate:admin?secret=JBSWY3DPEHPK3PXP&issuer=StreamGate&algorithm=SHA1&digits=6&period=30",
+  "secret": "JBSWY3DPEHPK3PXP"
+}
+```
+
+#### POST /api/admin/2fa/confirm
+
+Confirm 2FA setup by verifying a TOTP code. Enables 2FA and returns one-time recovery codes.
+
+```bash
+curl -X POST http://localhost:3000/api/admin/2fa/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"code": "123456"}' \
+  -b cookies.txt
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "recoveryCodes": ["Ab3kX9mQ", "Yp7nR2wL", "Ks9dF4hJ", "Wm6tB8vN", "Qx5cE1gP", "Zt4aH3uR", "Lv2bK7nS", "Df8jM5xW"]
+}
+```
+
+:::danger
+Recovery codes are shown **only once**. Users must save them securely. Each code can only be used once.
+:::
+
+#### POST /api/admin/2fa/reset
+
+Reset another user's 2FA (super_admin only). The target user must re-enroll on next login.
+
+```bash
+curl -X POST http://localhost:3000/api/admin/2fa/reset \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "target-user-id"}' \
+  -b cookies.txt
+```
+
+**Response (200):** `{ "success": true }`
+
+---
+
+### User Management (Super Admin Only)
+
+#### GET /api/admin/users
+
+List all admin users:
+
+```bash
+curl http://localhost:3000/api/admin/users -b cookies.txt
+```
+
+**Response (200):**
+```json
+{
+  "users": [
+    {
+      "id": "abc-123",
+      "visibleId": 1,
+      "username": "admin",
+      "role": "super_admin",
+      "isActive": true,
+      "twoFactorEnabled": true,
+      "lastLoginAt": "2026-04-26T10:30:00Z",
+      "createdAt": "2026-04-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+#### POST /api/admin/users
+
+Create a new admin user:
+
+```bash
+curl -X POST http://localhost:3000/api/admin/users \
+  -H "Content-Type: application/json" \
+  -d '{"username": "operator1", "password": "SecurePass123!", "role": "operator"}' \
+  -b cookies.txt
+```
+
+**Response (201):**
+```json
+{
+  "user": { "id": "def-456", "username": "operator1", "role": "operator" }
+}
+```
+
+#### PATCH /api/admin/users/:id
+
+Update a user (role, active status, password):
+
+```bash
+curl -X PATCH http://localhost:3000/api/admin/users/def-456 \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin", "isActive": true}' \
+  -b cookies.txt
+```
+
+#### DELETE /api/admin/users/:id
+
+Deactivate a user (soft-delete):
+
+```bash
+curl -X DELETE http://localhost:3000/api/admin/users/def-456 -b cookies.txt
+```
+
+---
+
+### Audit Log (Super Admin Only)
+
+#### GET /api/admin/audit-log
+
+Query audit log entries with optional filters:
+
+```bash
+curl "http://localhost:3000/api/admin/audit-log?action=login_success&limit=50&offset=0" -b cookies.txt
+```
+
+**Query Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `action` | string | Filter by action type |
+| `username` | string | Filter by actor username |
+| `since` | ISO date | Entries after this timestamp |
+| `until` | ISO date | Entries before this timestamp |
+| `limit` | number | Page size (default: 50) |
+| `offset` | number | Pagination offset |
+
+**Response (200):**
+```json
+{
+  "entries": [
+    {
+      "id": "log-001",
+      "userId": "abc-123",
+      "username": "admin",
+      "action": "login_success",
+      "resource": null,
+      "ipAddress": "127.0.0.1",
+      "userAgent": "Mozilla/5.0...",
+      "createdAt": "2026-04-26T10:30:00Z"
+    }
+  ],
+  "total": 142,
+  "limit": 50,
+  "offset": 0
+}
+```
 
 ---
 
