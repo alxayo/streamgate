@@ -113,24 +113,23 @@ export function mergeStreamConfig(
       ...systemDefaults.transcoder.h264,
       ...(eventOverrides.transcoder?.h264 ?? {}),
     },
-    // av1/vp9 are optional — only include if either side has values
-    ...(systemDefaults.transcoder.av1 || eventOverrides.transcoder?.av1
-      ? {
-          av1: {
-            ...systemDefaults.transcoder.av1,
-            ...(eventOverrides.transcoder?.av1 ?? {}),
-          },
-        }
-      : {}),
-    ...(systemDefaults.transcoder.vp9 || eventOverrides.transcoder?.vp9
-      ? {
-          vp9: {
-            ...systemDefaults.transcoder.vp9,
-            ...(eventOverrides.transcoder?.vp9 ?? {}),
-          },
-        }
-      : {}),
   };
+
+  // Merge optional codec sub-objects only if either side has values
+  if (systemDefaults.transcoder.av1 || eventOverrides.transcoder?.av1) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mergedTranscoder as any).av1 = {
+      ...systemDefaults.transcoder.av1,
+      ...(eventOverrides.transcoder?.av1 ?? {}),
+    };
+  }
+  if (systemDefaults.transcoder.vp9 || eventOverrides.transcoder?.vp9) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mergedTranscoder as any).vp9 = {
+      ...systemDefaults.transcoder.vp9,
+      ...(eventOverrides.transcoder?.vp9 ?? {}),
+    };
+  }
 
   // Merge player config: simple flat spread (no nested objects)
   const mergedPlayer: PlayerConfig = {

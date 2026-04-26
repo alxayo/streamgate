@@ -26,8 +26,8 @@ interface EventFormProps {
     endsAt: string;
     accessWindowHours: number;
     autoPurge: boolean;
-    transcoderConfig: string | null; // JSON string or null (use system defaults)
-    playerConfig: string | null;     // JSON string or null (use system defaults)
+    transcoderConfig?: string | null; // JSON string or null (use system defaults)
+    playerConfig?: string | null;     // JSON string or null (use system defaults)
   };
 }
 
