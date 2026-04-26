@@ -1,6 +1,22 @@
+// =========================================================================
+// Environment Variable Loader
+// =========================================================================
+// This module centralizes all environment variable access for the platform app.
+// It handles two tricky problems:
+//   1. bcrypt hashes contain "$" characters which Next.js dotenv interprets
+//      as variable references (e.g., $2b gets replaced). We read these directly
+//      from the .env file instead of using process.env.
+//   2. Some variables are optional (for gradual migration from legacy to
+//      multi-user auth). We provide null/undefined instead of throwing.
+// =========================================================================
+
 import fs from 'node:fs';
 import path from 'node:path';
 
+/**
+ * Reads an environment variable, throws if missing.
+ * Use this for variables that the app cannot start without.
+ */
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
@@ -8,14 +24,26 @@ function requireEnv(name: string): string {
 }
 
 /**
- * Read ADMIN_PASSWORD_HASH directly from .env file to avoid Next.js $ expansion.
+ * Reads an optional environment variable.
+ * Returns undefined (not empty string) if not set.
+ */
+function optionalEnv(name: string): string | undefined {
+  return process.env[name] || undefined;
+}
+
+/**
+ * Read a bcrypt hash from env, handling the $ expansion issue.
  * bcrypt hashes contain $ which Next.js interprets as env var references.
  */
-function loadAdminPasswordHash(): string {
-  // First check if a file-based hash is configured
-  const hashFile = process.env.ADMIN_PASSWORD_HASH_FILE;
+function loadBcryptHash(envName: string, fileSuffix: string = '_FILE'): string | undefined {
+  // Check if a file-based hash is configured
+  const hashFile = process.env[`${envName}${fileSuffix}`];
   if (hashFile) {
-    return fs.readFileSync(hashFile, 'utf-8').trim();
+    try {
+      return fs.readFileSync(hashFile, 'utf-8').trim();
+    } catch {
+      // fall through
+    }
   }
 
   // Read directly from .env file(s), bypassing dotenv expansion.
@@ -29,8 +57,8 @@ function loadAdminPasswordHash(): string {
       const content = fs.readFileSync(envPath, 'utf-8');
       for (const line of content.split('\n')) {
         const trimmed = line.trim();
-        if (trimmed.startsWith('ADMIN_PASSWORD_HASH=')) {
-          return trimmed.slice('ADMIN_PASSWORD_HASH='.length).trim().replace(/^["']|["']$/g, '');
+        if (trimmed.startsWith(`${envName}=`)) {
+          return trimmed.slice(`${envName}=`.length).trim().replace(/^["']|["']$/g, '');
         }
       }
     } catch {
@@ -38,20 +66,83 @@ function loadAdminPasswordHash(): string {
     }
   }
 
-  const directHash = process.env.ADMIN_PASSWORD_HASH;
+  const directHash = process.env[envName];
   if (directHash) {
     return directHash.trim().replace(/^["']|["']$/g, '');
   }
 
-  throw new Error('ADMIN_PASSWORD_HASH not found in environment variables or .env files');
+  return undefined;
 }
 
-let _adminHash: string | null = null;
+/**
+ * Read ADMIN_PASSWORD_HASH directly from .env file to avoid Next.js $ expansion.
+ * bcrypt hashes contain $ which Next.js interprets as env var references.
+ */
+function loadAdminPasswordHash(): string {
+  const hash = loadBcryptHash('ADMIN_PASSWORD_HASH');
+  if (!hash) {
+    throw new Error('ADMIN_PASSWORD_HASH not found in environment variables or .env files');
+  }
+  return hash;
+}
 
+// Cache hashes so we only read from disk once per process lifetime.
+// _adminHash: cached legacy ADMIN_PASSWORD_HASH
+// _emergencyHash: cached EMERGENCY_RECOVERY_PASSWORD (undefined = not yet loaded)
+let _adminHash: string | null = null;
+let _emergencyHash: string | null | undefined = undefined;
+
+/**
+ * Centralized environment variable access.
+ * All env vars are accessed as lazy getters so they're only read when first used.
+ */
 export const env = {
+  /**
+   * Legacy single-password admin hash.
+   * @deprecated Use multi-user auth instead. Kept only for backward compatibility
+   * during migration from the old single-password system.
+   */
   get ADMIN_PASSWORD_HASH() {
     if (!_adminHash) _adminHash = loadAdminPasswordHash();
     return _adminHash;
+  },
+  /**
+   * Secret used for two purposes:
+   *   1. Encrypting the iron-session admin cookie
+   *   2. Deriving the AES-256-GCM key for encrypting TOTP secrets at rest
+   * Must be at least 32 characters. Keep this secret safe — changing it
+   * will invalidate all existing sessions and make stored TOTP secrets
+   * unrecoverable.
+   */
+  get ADMIN_SESSION_SECRET() {
+    return requireEnv('ADMIN_SESSION_SECRET');
+  },
+  /**
+   * bcrypt hash of the emergency recovery password.
+   * Optional — if not set, the emergency login endpoint returns 404.
+   * This provides a last-resort way to access the admin console when all
+   * admin users are locked out of their 2FA. Every use is audit-logged.
+   */
+  get EMERGENCY_RECOVERY_PASSWORD() {
+    if (_emergencyHash === undefined) {
+      _emergencyHash = loadBcryptHash('EMERGENCY_RECOVERY_PASSWORD') ?? null;
+    }
+    return _emergencyHash;
+  },
+  /**
+   * Email for the first Super Admin user, created automatically on first
+   * startup when no admin users exist in the database. Optional — if not
+   * set, the app starts in legacy single-password mode.
+   */
+  get INITIAL_ADMIN_EMAIL() {
+    return optionalEnv('INITIAL_ADMIN_EMAIL');
+  },
+  /**
+   * Password for the first Super Admin (must be ≥12 characters).
+   * Only used together with INITIAL_ADMIN_EMAIL during first startup.
+   */
+  get INITIAL_ADMIN_PASSWORD() {
+    return optionalEnv('INITIAL_ADMIN_PASSWORD');
   },
   get PLAYBACK_SIGNING_SECRET() {
     return requireEnv('PLAYBACK_SIGNING_SECRET');
