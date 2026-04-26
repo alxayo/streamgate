@@ -6,6 +6,8 @@ import { getActiveSession, createSession } from '@/lib/session-service';
 import { getEventStatus } from '@/lib/stream-probe';
 import { sanitizeTokenCode, RATE_LIMIT_TOKEN_VALIDATION } from '@streaming/shared';
 import { env, getHlsBaseUrl } from '@/lib/env';
+import { getSystemDefaults, mergeStreamConfig } from '@/lib/stream-config';
+import type { TranscoderConfig, PlayerConfig } from '@streaming/shared';
 
 const validateLimiter = new RateLimiter(RATE_LIMIT_TOKEN_VALIDATION);
 
@@ -109,6 +111,19 @@ export async function POST(request: NextRequest) {
   // Determine live status
   const status = await getEventStatus(token.eventId, token.event.startsAt, token.event.endsAt);
 
+  // Merge player config (event overrides on top of system defaults)
+  const systemDefaults = await getSystemDefaults();
+  const eventOverrides = {
+    transcoder: token.event.transcoderConfig
+      ? (JSON.parse(token.event.transcoderConfig) as Partial<TranscoderConfig>)
+      : null,
+    player: token.event.playerConfig
+      ? (JSON.parse(token.event.playerConfig) as Partial<PlayerConfig>)
+      : null,
+  };
+  const hasOverrides = token.event.transcoderConfig !== null || token.event.playerConfig !== null;
+  const merged = mergeStreamConfig(systemDefaults, hasOverrides ? eventOverrides : null);
+
   return NextResponse.json({
     event: {
       title: token.event.title,
@@ -123,5 +138,6 @@ export async function POST(request: NextRequest) {
     streamPath: `/streams/${token.eventId}/master.m3u8`,
     expiresAt: token.expiresAt.toISOString(),
     tokenExpiresIn: expiresIn,
+    playerConfig: merged.player,
   });
 }
