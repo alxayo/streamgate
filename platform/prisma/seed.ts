@@ -20,7 +20,28 @@ function generateCode(): string {
 
 async function seed() {
   console.log('Seeding database...\n');
+  // Seed system settings (singleton)
+  const transcoderDefaults = JSON.stringify({
+    codecs: ['h264'],
+    profile: 'full-abr-1080p-720p-480p',
+    hlsTime: 2,
+    hlsListSize: 6,
+    forceKeyFrameInterval: 2,
+    h264: { tune: 'zerolatency', preset: 'ultrafast' },
+  });
+  const playerDefaults = JSON.stringify({
+    liveSyncDurationCount: 2,
+    liveMaxLatencyDurationCount: 4,
+    backBufferLength: 0,
+    lowLatencyMode: true,
+  });
 
+  await prisma.systemSettings.upsert({
+    where: { id: 'default' },
+    create: { id: 'default', transcoderDefaults, playerDefaults },
+    update: { transcoderDefaults, playerDefaults },
+  });
+  console.log('System settings seeded.');
   const now = new Date();
 
   // Event 1: Upcoming (starts in 2 hours)

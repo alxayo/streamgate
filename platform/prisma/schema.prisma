@@ -20,6 +20,8 @@ model Event {
   isActive          Boolean  @default(true)
   isArchived        Boolean  @default(false)
   autoPurge         Boolean  @default(true)
+  transcoderConfig  String?  // JSON: per-event transcoder overrides (null = use system defaults)
+  playerConfig      String?  // JSON: per-event player overrides (null = use system defaults)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -60,4 +62,11 @@ model ActiveSession {
   @@index([tokenId])
   @@index([sessionId])
   @@index([lastHeartbeat])
+}
+
+model SystemSettings {
+  id                String   @id @default("default")
+  transcoderDefaults String  // JSON: system-wide transcoder defaults
+  playerDefaults     String  // JSON: system-wide player defaults
+  updatedAt          DateTime @updatedAt
 }
