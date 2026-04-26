@@ -1,5 +1,19 @@
 import type { PlayerConfig } from './stream-config';
 
+/**
+ * Admin user roles — ordered from most to least privileged.
+ *
+ * Role Hierarchy:
+ *   SUPER_ADMIN    — Full access + can manage other admin users
+ *   ADMIN          — Full access to events/tokens/settings (no user management)
+ *   OPERATOR       — Can view events/tokens and manage live viewers
+ *   VIEWER_MANAGER — Can create/revoke tokens and view events
+ *   READ_ONLY      — View-only access to events, tokens, and dashboard
+ *
+ * See platform/src/lib/permissions.ts for the complete permission matrix.
+ */
+export type AdminRole = 'SUPER_ADMIN' | 'ADMIN' | 'OPERATOR' | 'VIEWER_MANAGER' | 'READ_ONLY';
+
 /** JWT playback token claims (PDR §4.3) */
 export interface PlaybackTokenClaims {
   sub: string; // Access token code

@@ -23,6 +23,53 @@ export const RATE_LIMIT_JWT_REFRESH = { maxRequests: 12, windowMs: 3_600_000 };
 /** Rate limit: admin login (PDR §12: 10/min per IP) */
 export const RATE_LIMIT_ADMIN_LOGIN = { maxRequests: 10, windowMs: 60_000 };
 
+// =========================================================================
+// Multi-User Admin Authentication Constants
+// =========================================================================
+// These constants configure the multi-user authentication system with TOTP 2FA.
+// They're shared between the platform app and any service that needs them.
+// =========================================================================
+
+/** Rate limit: emergency login (3 attempts/hour per IP) — very strict because
+ *  emergency login bypasses 2FA entirely */
+export const RATE_LIMIT_EMERGENCY_LOGIN = { maxRequests: 3, windowMs: 3_600_000 };
+
+/** Rate limit: 2FA verification — allows 5 attempts within the 5-minute
+ *  login token window before locking the user out */
+export const RATE_LIMIT_2FA_VERIFY = { maxRequests: 5, windowMs: 300_000 };
+
+/** How long the short-lived JWT token lasts between the password step and
+ *  the 2FA verification step (5 minutes). After this expires, the user must
+ *  re-enter their password. */
+export const LOGIN_TOKEN_EXPIRY_SECONDS = 300;
+
+// --- TOTP (Time-based One-Time Password) Configuration ---
+// These values must match what authenticator apps expect (RFC 6238).
+// Changing these after users have set up 2FA will lock them out!
+
+/** The issuer name shown in authenticator apps (e.g., "StreamGate" in Google Authenticator) */
+export const TOTP_ISSUER = 'StreamGate';
+
+/** Hash algorithm for TOTP — SHA1 is the most widely supported by authenticator apps */
+export const TOTP_ALGORITHM = 'SHA1';
+
+/** Number of digits in each TOTP code (standard is 6) */
+export const TOTP_DIGITS = 6;
+
+/** How often TOTP codes rotate in seconds (standard is 30) */
+export const TOTP_PERIOD = 30;
+
+/** Window of tolerance for clock drift — ±1 means we accept codes from the
+ *  previous period, current period, and next period (90-second window total) */
+export const TOTP_WINDOW = 1;
+
+/** Number of one-time-use recovery codes generated when 2FA is set up.
+ *  Each code is 10 hex characters formatted as XXXXX-XXXXX. */
+export const RECOVERY_CODE_COUNT = 10;
+
+/** Minimum password length enforced for all admin users */
+export const MIN_PASSWORD_LENGTH = 12;
+
 /** Revocation poll interval default (PDR §4.4: 30 seconds) */
 export const DEFAULT_REVOCATION_POLL_INTERVAL_MS = 30_000;
 
