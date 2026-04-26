@@ -1,3 +1,5 @@
+import type { PlayerConfig } from './stream-config';
+
 /** JWT playback token claims (PDR §4.3) */
 export interface PlaybackTokenClaims {
   sub: string; // Access token code
@@ -47,6 +49,7 @@ export interface TokenValidationResponse {
   streamPath: string;
   expiresAt: string;
   tokenExpiresIn: number;
+  playerConfig?: PlayerConfig;
 }
 
 /** JWT refresh response (PDR §10.1) */
