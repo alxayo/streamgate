@@ -111,19 +111,32 @@ export function EventForm({ initialData }: EventFormProps) {
       </div>
 
       {formData.streamType === 'LIVE' && (
-        <div className="flex items-center gap-3">
-          <input
-            type="checkbox"
-            id="autoPurge"
-            checked={formData.autoPurge}
-            onChange={(e) => setFormData({ ...formData, autoPurge: e.target.checked })}
-            className="h-4 w-4 rounded border-gray-300 text-accent-blue focus:ring-accent-blue"
-          />
-          <Label htmlFor="autoPurge" className="text-gray-700 cursor-pointer">
-            Auto-purge on publish
-          </Label>
+        <div className="space-y-2">
+          <Label className="text-gray-700">Auto-purge on publish</Label>
+          <div className="flex items-center gap-6">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="autoPurge"
+                checked={formData.autoPurge === true}
+                onChange={() => setFormData({ ...formData, autoPurge: true })}
+                className="h-4 w-4 border-gray-300 text-accent-blue focus:ring-accent-blue"
+              />
+              <span className="text-sm text-gray-900">On</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="autoPurge"
+                checked={formData.autoPurge === false}
+                onChange={() => setFormData({ ...formData, autoPurge: false })}
+                className="h-4 w-4 border-gray-300 text-accent-blue focus:ring-accent-blue"
+              />
+              <span className="text-sm text-gray-900">Off</span>
+            </label>
+          </div>
           <p className="text-xs text-gray-500">
-            Automatically clear stale segments when a new stream starts
+            When On, existing HLS segments and blobs are deleted before a new RTMP publish starts for this event.
           </p>
         </div>
       )}

@@ -63,6 +63,7 @@ export default function EventDetailPage() {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [purging, setPurging] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [togglingAutoPurge, setTogglingAutoPurge] = useState(false);
 
   const fetchEvent = async () => {
     try {
@@ -154,6 +155,25 @@ export default function EventDetailPage() {
     }
   };
 
+  const handleToggleAutoPurge = async () => {
+    if (!event) return;
+    setTogglingAutoPurge(true);
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoPurge: !event.autoPurge }),
+      });
+      if (res.ok) {
+        fetchEvent();
+      }
+    } catch {
+      console.error('Failed to toggle auto-purge');
+    } finally {
+      setTogglingAutoPurge(false);
+    }
+  };
+
   const copyCode = (code: string, id: string) => {
     navigator.clipboard.writeText(code);
     setCopiedId(id);
@@ -181,13 +201,18 @@ export default function EventDetailPage() {
               {event.streamType === 'VOD' ? 'VOD' : 'Live'}
             </span>
             {event.streamType === 'LIVE' && (
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                event.autoPurge
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-gray-100 text-gray-500'
-              }`}>
-                {event.autoPurge ? 'Auto-purge ON' : 'Auto-purge OFF'}
-              </span>
+              <button
+                onClick={handleToggleAutoPurge}
+                disabled={togglingAutoPurge}
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer transition-colors hover:opacity-80 ${
+                  event.autoPurge
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-gray-100 text-gray-500'
+                }`}
+                title="Click to toggle auto-purge"
+              >
+                {togglingAutoPurge ? '...' : event.autoPurge ? 'Auto-purge ON' : 'Auto-purge OFF'}
+              </button>
             )}
           </div>
           <p className="text-xs text-gray-400 mt-1 font-mono">{event.id}</p>
