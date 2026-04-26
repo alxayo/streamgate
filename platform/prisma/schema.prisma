@@ -7,6 +7,90 @@ datasource db {
   provider = "sqlite"
 }
 
+// =========================================================================
+// Admin User Management — Multi-User Authentication with TOTP 2FA
+// =========================================================================
+// This section defines the database models for the multi-user admin system.
+// The system supports:
+//   - Multiple admin users with email/password authentication
+//   - Mandatory TOTP-based two-factor authentication (Google/Microsoft Authenticator)
+//   - One-time-use recovery codes as a 2FA backup
+//   - Role-based access control (RBAC) with 5 permission tiers
+//   - Full audit logging of all authentication and admin actions
+// =========================================================================
+
+/// An admin user who can log in to the admin console.
+/// Each user must set up TOTP 2FA on first login (mustSetup2FA flag).
+model AdminUser {
+  id           String    @id @default(uuid())  // Unique identifier (UUID v4)
+  email        String    @unique               // Login email — must be unique across all admins
+  passwordHash String                          // bcrypt-hashed password (12 salt rounds)
+
+  // Role determines what the user can do. See lib/permissions.ts for the full matrix.
+  // Hierarchy: SUPER_ADMIN > ADMIN > OPERATOR > VIEWER_MANAGER > READ_ONLY
+  role         String    @default("ADMIN")
+
+  // TOTP (Time-based One-Time Password) fields for two-factor authentication.
+  // The secret is encrypted with AES-256-GCM before storage (see lib/totp-crypto.ts).
+  totpSecret   String?                         // Encrypted TOTP secret (null until 2FA is set up)
+  totpEnabled  Boolean   @default(false)       // True after user completes 2FA setup
+  mustSetup2FA Boolean   @default(true)        // Forces 2FA setup on next login
+
+  isActive     Boolean   @default(true)        // Soft-delete: inactive users cannot log in
+  lastLoginAt  DateTime?                       // Timestamp of most recent successful login
+  createdById  String?                         // ID of the admin who created this user (nullable for seed)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Self-referential relation: tracks which admin created this user
+  createdBy     AdminUser?    @relation("CreatedByAdmin", fields: [createdById], references: [id])
+  createdUsers  AdminUser[]   @relation("CreatedByAdmin")
+  recoveryCodes RecoveryCode[]  // One-time-use backup codes for 2FA
+  auditLogs     AuditLog[]      // Actions performed by or related to this user
+
+  @@index([email])  // Fast lookup for login
+  @@index([role])   // Fast filtering by role
+}
+
+/// A one-time-use recovery code for 2FA backup.
+/// When a user sets up 2FA, 10 recovery codes are generated. Each code can
+/// only be used once (tracked by the usedAt timestamp). The plaintext code
+/// is shown to the user once and only the bcrypt hash is stored in the DB.
+model RecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String                          // The admin user this code belongs to
+  codeHash  String                          // bcrypt hash of the recovery code (plaintext never stored)
+  usedAt    DateTime?                       // Null if unused; set to timestamp when consumed
+  createdAt DateTime  @default(now())
+
+  // Cascade delete: if the user is deleted, their recovery codes are too
+  user AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])  // Fast lookup of all codes for a user during recovery login
+}
+
+/// Immutable audit trail for all authentication and admin actions.
+/// Every login attempt (success/failure), 2FA setup, user creation, emergency
+/// access, and role change is recorded here. The audit log is append-only and
+/// viewable by Super Admins via the admin console UI.
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?                         // The acting user (null for emergency/system actions)
+  action    String                          // Action type: login, login_failed, 2fa_setup, user_created, etc.
+  details   String?                         // Optional JSON string with extra context (e.g., target user email)
+  ipAddress String                          // Client IP address for the request
+  createdAt DateTime @default(now())        // When the action occurred
+
+  // SetNull: if the user is deleted, the log entry persists but userId becomes null
+  user AdminUser? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])    // Filter logs by user
+  @@index([action])    // Filter logs by action type
+  @@index([createdAt]) // Sort/paginate by time
+}
+
+// --- Streaming Platform ---
+
 model Event {
   id                String   @id @default(uuid())
   title             String
