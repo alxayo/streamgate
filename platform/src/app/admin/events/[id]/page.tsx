@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users, QrCode, Eraser, Film, Loader2 } from 'lucide-react';
+import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users, QrCode, Eraser, Film, Loader2, Radio, Settings, ClipboardCopy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EventStatusBadge } from '@/components/admin/event-status-badge';
@@ -65,6 +65,19 @@ export default function EventDetailPage() {
   const [finalizing, setFinalizing] = useState(false);
   const [togglingAutoPurge, setTogglingAutoPurge] = useState(false);
 
+  // Stream config + ingest endpoints (fetched for LIVE events)
+  const [streamConfig, setStreamConfig] = useState<{
+    configSource: string;
+    transcoder: Record<string, unknown>;
+    player: Record<string, unknown>;
+    overrides: { transcoder: boolean; player: boolean };
+    ingest: {
+      rtmp: { url: string; server: string; streamKey: string };
+      srt: { url: string } | null;
+    };
+  } | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
   const fetchEvent = async () => {
     try {
       const [eventRes, tokensRes] = await Promise.all([
@@ -75,6 +88,17 @@ export default function EventDetailPage() {
       const tokensData = await tokensRes.json();
       setEvent(eventData.data);
       setTokens(tokensData.data || []);
+
+      // Fetch stream config + ingest endpoints for LIVE events
+      if (eventData.data?.streamType === 'LIVE') {
+        try {
+          const configRes = await fetch(`/api/admin/events/${eventId}/stream-config`);
+          if (configRes.ok) {
+            const configData = await configRes.json();
+            setStreamConfig(configData.data);
+          }
+        } catch { /* stream config is non-critical */ }
+      }
     } catch {
       console.error('Failed to fetch event details');
     } finally {
@@ -180,6 +204,13 @@ export default function EventDetailPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  /** Copy a value to clipboard and show a brief "Copied!" indicator */
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
   if (loading) return <div className="text-gray-400">Loading...</div>;
   if (!event) return <div className="text-gray-400">Event not found</div>;
 
@@ -251,6 +282,166 @@ export default function EventDetailPage() {
           </div>
         ))}
       </div>
+
+      {/* ================================================================
+          INGEST ENDPOINTS — RTMP/SRT URLs for OBS/FFmpeg
+          Only shown for LIVE events when stream config is loaded.
+          ================================================================ */}
+      {event.streamType === 'LIVE' && streamConfig && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Radio className="h-4 w-4 text-red-500" />
+            <h3 className="font-medium text-gray-900">Ingest Endpoints</h3>
+          </div>
+
+          {/* RTMP — full URL */}
+          <div className="space-y-1">
+            <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">RTMP (full URL)</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-sm font-mono text-gray-800 break-all select-all">
+                {streamConfig.ingest.rtmp.url}
+              </code>
+              <button
+                onClick={() => copyToClipboard(streamConfig.ingest.rtmp.url, 'rtmp-url')}
+                className="p-2 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                title="Copy RTMP URL"
+              >
+                {copiedField === 'rtmp-url' ? <Check className="h-4 w-4 text-green-500" /> : <ClipboardCopy className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* RTMP — split for OBS (Server + Stream Key) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">OBS Server</p>
+              <div className="flex items-center gap-1">
+                <code className="flex-1 bg-gray-50 border border-gray-200 rounded px-3 py-1.5 text-xs font-mono text-gray-800 break-all select-all">
+                  {streamConfig.ingest.rtmp.server}
+                </code>
+                <button
+                  onClick={() => copyToClipboard(streamConfig.ingest.rtmp.server, 'rtmp-server')}
+                  className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                >
+                  {copiedField === 'rtmp-server' ? <Check className="h-3.5 w-3.5 text-green-500" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">OBS Stream Key</p>
+              <div className="flex items-center gap-1">
+                <code className="flex-1 bg-gray-50 border border-gray-200 rounded px-3 py-1.5 text-xs font-mono text-gray-800 break-all select-all">
+                  {streamConfig.ingest.rtmp.streamKey}
+                </code>
+                <button
+                  onClick={() => copyToClipboard(streamConfig.ingest.rtmp.streamKey, 'rtmp-key')}
+                  className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                >
+                  {copiedField === 'rtmp-key' ? <Check className="h-3.5 w-3.5 text-green-500" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* SRT — if configured */}
+          {streamConfig.ingest.srt && (
+            <div className="space-y-1 pt-2 border-t border-gray-100">
+              <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">SRT</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-sm font-mono text-gray-800 break-all select-all">
+                  {streamConfig.ingest.srt.url}
+                </code>
+                <button
+                  onClick={() => copyToClipboard(streamConfig.ingest.srt!.url, 'srt-url')}
+                  className="p-2 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                >
+                  {copiedField === 'srt-url' ? <Check className="h-4 w-4 text-green-500" /> : <ClipboardCopy className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!streamConfig.ingest.srt && (
+            <p className="text-xs text-gray-400 pt-1">SRT not configured. Set SRT_SERVER_HOST env var to enable.</p>
+          )}
+        </div>
+      )}
+
+      {/* ================================================================
+          STREAM CONFIGURATION — effective config with Default/Custom badges
+          Only shown for LIVE events when stream config is loaded.
+          ================================================================ */}
+      {event.streamType === 'LIVE' && streamConfig && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Settings className="h-4 w-4 text-gray-500" />
+              <h3 className="font-medium text-gray-900">Stream Configuration</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                streamConfig.configSource === 'event'
+                  ? 'bg-blue-100 text-blue-700'
+                  : 'bg-gray-100 text-gray-500'
+              }`}>
+                {streamConfig.configSource === 'event' ? 'Custom' : 'System Default'}
+              </span>
+              <Link href={`/admin/events/${eventId}/edit`}>
+                <Button variant="outline" size="sm" className="bg-white border-gray-300 text-gray-700 hover:bg-gray-50 text-xs h-7 px-2">
+                  Edit
+                </Button>
+              </Link>
+            </div>
+          </div>
+
+          {/* Transcoder settings grid */}
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <p className="text-xs text-gray-500">Profile</p>
+              <p className="font-medium text-gray-900">{String(streamConfig.transcoder.profile)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Segment Duration</p>
+              <p className="font-medium text-gray-900">{String(streamConfig.transcoder.hlsTime)}s</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Playlist Window</p>
+              <p className="font-medium text-gray-900">{String(streamConfig.transcoder.hlsListSize)} segments</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Keyframe Interval</p>
+              <p className="font-medium text-gray-900">{String(streamConfig.transcoder.forceKeyFrameInterval)}s</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">H.264 Tune</p>
+              <p className="font-medium text-gray-900">{String((streamConfig.transcoder.h264 as Record<string, unknown>)?.tune || 'none')}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">H.264 Preset</p>
+              <p className="font-medium text-gray-900">{String((streamConfig.transcoder.h264 as Record<string, unknown>)?.preset || 'ultrafast')}</p>
+            </div>
+          </div>
+
+          {/* Player settings */}
+          <div className="pt-2 border-t border-gray-100">
+            <p className="text-xs text-gray-500 uppercase tracking-wider font-medium mb-2">Player</p>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div>
+                <p className="text-xs text-gray-500">Live Sync</p>
+                <p className="font-medium text-gray-900">{String(streamConfig.player.liveSyncDurationCount)} segments</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Max Latency</p>
+                <p className="font-medium text-gray-900">{String(streamConfig.player.liveMaxLatencyDurationCount)} segments</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Low Latency Mode</p>
+                <p className="font-medium text-gray-900">{streamConfig.player.lowLatencyMode ? 'Enabled' : 'Disabled'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2">
