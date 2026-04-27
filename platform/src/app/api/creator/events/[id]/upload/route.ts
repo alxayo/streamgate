@@ -18,8 +18,9 @@ import { prisma } from '@/lib/prisma';
 import { requireCreator } from '@/lib/creator-session';
 import { getSystemDefaults } from '@/lib/stream-config';
 import { ALLOWED_VIDEO_MIME_TYPES } from '@streaming/shared';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, writeFile, unlink, rmdir } from 'fs/promises';
 import path from 'path';
+import { cleanupCompletedJob } from '@/lib/transcoder-cleanup';
 
 // Next.js 14+ dynamic route params are delivered as a Promise
 interface RouteParams {
@@ -264,4 +265,140 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     },
     { status: 202 },
   );
+}
+
+// =========================================================================
+// Creator Upload Delete — DELETE /api/creator/events/:id/upload
+// =========================================================================
+// Deletes an upload and its associated resources (files on disk, ACI
+// container groups from transcoding). The creator can use this to remove
+// an uploaded file and start fresh, or to clean up after a failed upload.
+//
+// Auth: Creator session cookie (must own the event's channel).
+//
+// Preconditions:
+//   - The event must exist and belong to the creator's channel
+//   - An upload must exist for this event
+//   - The upload must NOT be in UPLOADING or TRANSCODING state (those are
+//     in-progress operations that shouldn't be interrupted — returns 409)
+//
+// Cleanup steps:
+//   1. Clean up any ACI container groups left over from transcoding
+//   2. Delete the uploaded file from disk
+//   3. Try to remove the now-empty upload directory
+//   4. Delete the Upload record from the database (cascade deletes jobs)
+//
+// Response: { data: { deleted: true } }
+// =========================================================================
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+  // ── Step 1: Authenticate ──────────────────────────────────────────────
+  // Only logged-in creators may delete uploads. requireCreator() checks the
+  // session cookie and returns { creatorId, channelId } or null.
+  const session = await requireCreator();
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // ── Step 2: Extract event ID from URL path ────────────────────────────
+  // Next.js 14+ delivers dynamic route params as a Promise, so we await it.
+  const { id } = await params;
+
+  // ── Step 3: Verify event ownership ────────────────────────────────────
+  // Scope the query to the creator's own channel so they can't delete
+  // uploads belonging to other channels. We intentionally don't reveal
+  // whether the event exists for another channel (returns 404 either way).
+  const event = await prisma.event.findFirst({
+    where: { id, channelId: session.channelId },
+    select: { id: true },
+  });
+
+  if (!event) {
+    return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+  }
+
+  // ── Step 4: Fetch the upload with its transcode jobs ──────────────────
+  // We need the upload record to know the filename (for disk cleanup) and
+  // the transcode jobs to know which ACI containers to tear down.
+  const upload = await prisma.upload.findUnique({
+    where: { eventId: event.id },
+    include: {
+      transcodeJobs: {
+        select: {
+          id: true,
+          aciContainerGroup: true,
+        },
+      },
+    },
+  });
+
+  // If no upload exists for this event, there's nothing to delete.
+  if (!upload) {
+    return NextResponse.json({ error: 'No upload found for this event' }, { status: 404 });
+  }
+
+  // ── Step 5: Block deletion of in-progress uploads ─────────────────────
+  // Uploads in UPLOADING or TRANSCODING state are actively being processed.
+  // Deleting mid-operation could corrupt data or leave orphaned resources.
+  // The creator should wait for the operation to finish (or fail) first.
+  if (upload.status === 'UPLOADING' || upload.status === 'TRANSCODING') {
+    return NextResponse.json(
+      { error: 'Cannot delete an upload that is currently in progress. Wait for it to finish or fail.' },
+      { status: 409 },
+    );
+  }
+
+  // ── Step 6: Clean up ACI container groups from transcoding ────────────
+  // When a video is transcoded, we spin up ephemeral Azure Container
+  // Instance containers (one per codec). Even after they finish, the ACI
+  // "container group" resource lingers in Azure. cleanupCompletedJob()
+  // deletes each one. We only call it for jobs that actually have an ACI
+  // container group assigned (aciContainerGroup is non-null).
+  for (const job of upload.transcodeJobs) {
+    if (job.aciContainerGroup) {
+      try {
+        await cleanupCompletedJob(job.id);
+      } catch (err) {
+        // Log but don't fail the whole delete — the container cleanup is
+        // best-effort. The periodic cleanup cron will catch any stragglers.
+        console.error(`Failed to cleanup ACI container for job ${job.id}:`, err);
+      }
+    }
+  }
+
+  // ── Step 7: Delete the uploaded file from disk ────────────────────────
+  // The file lives at uploads/{eventId}/{fileName}. We use unlink() to
+  // remove it. If the file is already gone (ENOENT), we ignore the error
+  // — it may have been manually cleaned up or the upload failed before
+  // the file was fully written.
+  try {
+    const filePath = path.join(process.cwd(), 'uploads', event.id, upload.fileName);
+    await unlink(filePath);
+  } catch (err: unknown) {
+    // ENOENT means "file not found" — that's fine, nothing to delete.
+    // Any other error (permissions, etc.) we log but don't fail on.
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error(`Failed to delete upload file for event ${event.id}:`, err);
+    }
+  }
+
+  // ── Step 8: Try to remove the event's upload directory ────────────────
+  // After deleting the file, the directory may be empty. rmdir() only
+  // succeeds on empty directories, so if there are other files (unlikely
+  // but possible), it will fail silently — which is exactly what we want.
+  try {
+    const uploadDir = path.join(process.cwd(), 'uploads', event.id);
+    await rmdir(uploadDir);
+  } catch {
+    // Ignore all errors — the directory might not be empty, might not
+    // exist, or we might not have permissions. All are acceptable.
+  }
+
+  // ── Step 9: Delete the Upload record from the database ────────────────
+  // The Prisma schema has `onDelete: Cascade` on the TranscodeJob →
+  // Upload relation, so deleting the Upload automatically deletes all
+  // associated TranscodeJob records. No manual job deletion needed.
+  await prisma.upload.delete({ where: { id: upload.id } });
+
+  // ── Step 10: Return success ───────────────────────────────────────────
+  return NextResponse.json({ data: { deleted: true } });
 }
