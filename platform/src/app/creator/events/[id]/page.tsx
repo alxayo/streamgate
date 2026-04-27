@@ -13,10 +13,10 @@
 // attempts to access events owned by other channels.
 // =========================================================================
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, useRef, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Copy, Check, Pencil, Trash2, Archive, Eraser, Save, X } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Pencil, Trash2, Archive, Eraser, Save, X, Upload, FileVideo, RefreshCw, RotateCcw } from 'lucide-react';
 
 interface EventData {
   id: string;
@@ -49,6 +49,37 @@ interface IngestData {
   token: string | null;
 }
 
+// =========================================================================
+// VOD Upload Types
+// =========================================================================
+// The upload flow for VOD events:
+//   1. Creator selects a video file and clicks "Upload"
+//   2. File is POSTed as FormData to /api/creator/events/:id/upload
+//   3. Server processes the upload and begins transcoding
+//   4. UI polls GET /api/creator/events/:id/upload every 3s for status
+//   5. Each codec (e.g. H.264, AV1) has its own progress bar
+//   6. Once all codecs finish, status becomes READY
+// =========================================================================
+
+interface TranscodeJob {
+  id: string;
+  codec: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  progress: number | null;
+  errorMessage: string | null;
+}
+
+interface UploadData {
+  id: string;
+  fileName: string;
+  fileSize: string; // BigInt serialized as string
+  mimeType: string;
+  status: 'UPLOADING' | 'UPLOADED' | 'TRANSCODING' | 'READY' | 'FAILED';
+  errorMessage: string | null;
+  duration: number | null;
+  transcodeJobs: TranscodeJob[];
+}
+
 export default function CreatorEventDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -70,6 +101,16 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmVod, setConfirmVod] = useState(false);
+
+  // --- VOD Upload state ---
+  // Tracks the selected file, upload progress, and server-side upload/transcode status
+  const [vodFile, setVodFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploading, setUploading] = useState(false);
+  const [uploadData, setUploadData] = useState<UploadData | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [confirmReupload, setConfirmReupload] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchEvent = () => {
     fetch(`/api/creator/events/${id}`)
@@ -103,10 +144,152 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
       .catch(() => {});
   };
 
+  // --- VOD Upload helpers ---
+
+  // Fetch the current upload status from the server
+  const fetchUploadStatus = useCallback(() => {
+    fetch(`/api/creator/events/${id}/upload`)
+      .then(res => {
+        if (res.status === 404) return null; // No upload exists yet
+        if (!res.ok) throw new Error('Failed to fetch upload status');
+        return res.json();
+      })
+      .then(data => {
+        if (data?.data) setUploadData(data.data);
+      })
+      .catch(() => {});
+  }, [id]);
+
+  // Upload the selected file to the server using XMLHttpRequest for progress tracking
+  const handleUpload = async () => {
+    if (!vodFile) return;
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
+
+    const formData = new FormData();
+    formData.append('file', vodFile);
+
+    // Use XMLHttpRequest instead of fetch so we can track upload progress
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/creator/events/${id}/upload`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        setUploadProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      setUploading(false);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.data) setUploadData(data.data);
+        } catch { /* ignore parse errors */ }
+        setVodFile(null);
+        // Reset file input so the same file can be re-selected if needed
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      } else {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          setUploadError(data.error || 'Upload failed');
+        } catch {
+          setUploadError('Upload failed');
+        }
+      }
+    };
+
+    xhr.onerror = () => {
+      setUploading(false);
+      setUploadError('Network error — please check your connection and try again');
+    };
+
+    xhr.send(formData);
+  };
+
+  // Delete the current upload and reset all VOD state
+  const handleDeleteUpload = async () => {
+    setActionLoading('delete-upload');
+    try {
+      const res = await fetch(`/api/creator/events/${id}/upload`, { method: 'DELETE' });
+      if (res.ok) {
+        setUploadData(null);
+        setVodFile(null);
+        setUploadError(null);
+        setUploadProgress(0);
+        setConfirmReupload(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    } catch {
+      setUploadError('Failed to delete upload');
+    }
+    setActionLoading(null);
+  };
+
+  // Retry transcoding for a failed upload
+  const handleRetryTranscode = async () => {
+    setActionLoading('retry-transcode');
+    setUploadError(null);
+    try {
+      const res = await fetch(`/api/creator/events/${id}/transcode`, { method: 'POST' });
+      if (res.ok) {
+        fetchUploadStatus();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setUploadError(data.error || 'Failed to retry transcoding');
+      }
+    } catch {
+      setUploadError('Failed to retry transcoding');
+    }
+    setActionLoading(null);
+  };
+
+  // Format bytes to a human-readable string (e.g. "1.5 GB")
+  const formatFileSize = (bytes: number | string): string => {
+    const n = typeof bytes === 'string' ? parseInt(bytes, 10) : bytes;
+    if (isNaN(n)) return 'Unknown size';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  };
+
+  // Format seconds into human-readable duration (e.g. "1h 23m 45s")
+  const formatDuration = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
   useEffect(() => {
     Promise.all([fetchEvent(), fetchTokens(), fetchIngest()])
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Fetch initial VOD upload status when the event is loaded and is VOD type
+  useEffect(() => {
+    if (event?.streamType === 'VOD') {
+      fetchUploadStatus();
+    }
+  }, [event?.streamType, fetchUploadStatus]);
+
+  // Poll for upload/transcode progress every 3 seconds while processing.
+  // Polling stops automatically once status reaches READY or FAILED.
+  useEffect(() => {
+    const shouldPoll =
+      event?.streamType === 'VOD' &&
+      uploadData &&
+      ['UPLOADING', 'UPLOADED', 'TRANSCODING'].includes(uploadData.status);
+
+    if (!shouldPoll) return;
+
+    const interval = setInterval(fetchUploadStatus, 3000);
+    return () => clearInterval(interval);
+  }, [event?.streamType, uploadData?.status, fetchUploadStatus]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -448,6 +631,206 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* VOD Upload Section                                                 */}
+      {/* ================================================================= */}
+      {/* Shown only for VOD events. Handles the full lifecycle:             */}
+      {/*   file selection → upload → transcoding progress → ready/failed    */}
+      {/* ================================================================= */}
+      {event.streamType === 'VOD' && (
+        <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+          <div className="flex items-center gap-3">
+            <FileVideo className="h-5 w-5 text-purple-600" />
+            <h2 className="text-lg font-semibold text-gray-900">VOD Upload</h2>
+            {/* Status badge next to the title */}
+            {uploadData && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                uploadData.status === 'READY'
+                  ? 'bg-green-50 text-green-700'
+                  : uploadData.status === 'FAILED'
+                    ? 'bg-red-50 text-red-700'
+                    : 'bg-blue-50 text-blue-700'
+              }`}>
+                {uploadData.status === 'READY' ? 'VOD Ready ✓' : uploadData.status}
+              </span>
+            )}
+          </div>
+
+          {/* --- State 1: No upload yet — show file picker --- */}
+          {!uploadData && !uploading && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">
+                Select a video file to upload. Supported formats: MP4, MOV, MKV, WebM, AVI.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".mp4,.mov,.mkv,.webm,.avi"
+                  onChange={e => setVodFile(e.target.files?.[0] || null)}
+                  className="text-sm text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-md file:border file:border-gray-300 file:text-sm file:font-medium file:bg-white file:text-gray-700 hover:file:bg-gray-50 file:cursor-pointer file:transition-colors"
+                />
+                {vodFile && (
+                  <button
+                    onClick={handleUpload}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
+                  >
+                    <Upload className="h-3.5 w-3.5" /> Upload
+                  </button>
+                )}
+              </div>
+              {/* Show selected file info */}
+              {vodFile && (
+                <p className="text-xs text-gray-500">
+                  {vodFile.name} — {formatFileSize(vodFile.size)}
+                </p>
+              )}
+              {uploadError && (
+                <p className="text-sm text-red-600">{uploadError}</p>
+              )}
+            </div>
+          )}
+
+          {/* --- State 2: Uploading — show browser-to-server progress --- */}
+          {uploading && (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600">
+                Uploading {vodFile?.name}...
+              </p>
+              <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500">{uploadProgress}% uploaded</p>
+            </div>
+          )}
+
+          {/* --- State 3: Transcoding — show per-codec progress bars --- */}
+          {uploadData && ['UPLOADING', 'UPLOADED', 'TRANSCODING'].includes(uploadData.status) && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">
+                {uploadData.status === 'TRANSCODING'
+                  ? 'Transcoding in progress — this may take a while depending on file size.'
+                  : 'Processing upload...'}
+              </p>
+              {/* File info */}
+              <p className="text-xs text-gray-500">
+                {uploadData.fileName} — {formatFileSize(uploadData.fileSize)}
+              </p>
+              {/* Transcode job progress bars */}
+              {uploadData.transcodeJobs.length > 0 && (
+                <div className="space-y-2">
+                  {uploadData.transcodeJobs.map(job => (
+                    <div key={job.id} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-gray-700">{job.codec}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${
+                          job.status === 'COMPLETED' ? 'bg-green-50 text-green-700'
+                          : job.status === 'FAILED' ? 'bg-red-50 text-red-700'
+                          : job.status === 'RUNNING' ? 'bg-blue-50 text-blue-700'
+                          : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {job.status}{job.progress != null && job.status === 'RUNNING' ? ` ${job.progress}%` : ''}
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            job.status === 'COMPLETED' ? 'bg-green-500'
+                            : job.status === 'FAILED' ? 'bg-red-500'
+                            : 'bg-blue-500'
+                          }`}
+                          style={{ width: `${job.status === 'COMPLETED' ? 100 : (job.progress ?? 0)}%` }}
+                        />
+                      </div>
+                      {job.errorMessage && (
+                        <p className="text-xs text-red-600">{job.errorMessage}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* --- State 4: Ready — show success badge and re-upload option --- */}
+          {uploadData?.status === 'READY' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-green-800">VOD Ready ✓</p>
+                  <p className="text-xs text-green-700 mt-0.5">
+                    {uploadData.fileName} — {formatFileSize(uploadData.fileSize)}
+                    {uploadData.duration != null && ` — ${formatDuration(uploadData.duration)}`}
+                  </p>
+                </div>
+              </div>
+              {/* Re-upload flow: confirm before deleting */}
+              {!confirmReupload ? (
+                <button
+                  onClick={() => setConfirmReupload(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-md hover:bg-orange-100 transition-colors"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Delete &amp; Re-upload
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">Delete current VOD and upload a new file?</span>
+                  <button
+                    onClick={handleDeleteUpload}
+                    disabled={actionLoading === 'delete-upload'}
+                    className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {actionLoading === 'delete-upload' ? 'Deleting...' : 'Confirm'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmReupload(false)}
+                    className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* --- State 5: Failed — show error and retry/re-upload buttons --- */}
+          {uploadData?.status === 'FAILED' && (
+            <div className="space-y-3">
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm font-medium text-red-800">Upload Failed</p>
+                <p className="text-xs text-red-700 mt-0.5">
+                  {uploadData.errorMessage || 'An unexpected error occurred during processing.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleRetryTranscode}
+                  disabled={actionLoading === 'retry-transcode'}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${actionLoading === 'retry-transcode' ? 'animate-spin' : ''}`} />
+                  {actionLoading === 'retry-transcode' ? 'Retrying...' : 'Retry Transcoding'}
+                </button>
+                <button
+                  onClick={handleDeleteUpload}
+                  disabled={actionLoading === 'delete-upload'}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 disabled:opacity-50 transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {actionLoading === 'delete-upload' ? 'Deleting...' : 'Delete & Try Again'}
+                </button>
+              </div>
+              {uploadError && (
+                <p className="text-sm text-red-600">{uploadError}</p>
+              )}
             </div>
           )}
         </div>
