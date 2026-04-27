@@ -4,10 +4,12 @@
 // Scoped to the authenticated creator's active channel.
 // =========================================================================
 
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isValidAccessWindow, isValidEventSchedule } from '@streaming/shared';
 import { requireCreator } from '@/lib/creator-session';
+import { generateRtmpToken, generateStreamKeyHash } from '@/lib/rtmp-tokens';
 
 // GET /api/creator/events — List creator's events
 export async function GET(request: NextRequest) {
@@ -94,6 +96,10 @@ export async function POST(request: NextRequest) {
 
   const validStreamType = streamType === 'VOD' ? 'VOD' : 'LIVE';
 
+  // Generate RTMP tokens and stream key hash
+  const rtmpToken = generateRtmpToken(crypto.randomUUID(), title);
+  const rtmpStreamKeyHash = generateStreamKeyHash(crypto.randomUUID(), title);
+
   const event = await prisma.event.create({
     data: {
       title: title.trim(),
@@ -105,6 +111,9 @@ export async function POST(request: NextRequest) {
       endsAt: endDate,
       accessWindowHours: windowHours,
       channelId: session.channelId!,
+      rtmpToken,
+      rtmpStreamKeyHash,
+      rtmpTokenExpiresAt: endDate,
     },
   });
 

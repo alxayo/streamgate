@@ -1,24 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { env } from '@/lib/env';
+import { isValidRtmpToken, isValidStreamKeyHash } from '@/lib/rtmp-tokens';
 
-// POST /api/rtmp/auth — Callback endpoint for RTMP server auth validation
-// The RTMP server sends a JSON body for each publish/play request:
-// { action, app, stream_name, stream_key, token, remote_addr }
-// Returns 200 to allow, 403 to deny.
-//
-// Security: This endpoint validates the RTMP auth token in the request body.
-// The token itself serves as authentication — only callers with the correct
-// RTMP_AUTH_TOKEN can get a 200 response. No additional header auth is needed.
+/**
+ * POST /api/rtmp/auth — Webhook for rtmp-go RTMP server auth validation
+ * 
+ * Called by rtmp-go to validate RTMP publish/play requests using per-event tokens.
+ * Requires X-Internal-Api-Key header for authentication.
+ * 
+ * Request body:
+ *   { streamKeyHash: string, token: string, action: "publish" | "play", publisherIp: string }
+ * 
+ * Response (200 OK):
+ *   { authorized: true, eventId, eventTitle, storagePath, rtmpTokenExpiresAt }
+ * 
+ * Response (403 Forbidden):
+ *   { authorized: false, reason: string }
+ */
 export async function POST(request: NextRequest) {
+  // Validate internal API key from header
+  const apiKey = request.headers.get('X-Internal-Api-Key');
+  const expectedKey = process.env.INTERNAL_API_KEY;
+
+  if (!expectedKey || apiKey !== expectedKey) {
+    return NextResponse.json(
+      { error: 'Invalid API key' },
+      { status: 401 },
+    );
+  }
 
   let body: {
-    action?: string;
-    app?: string;
-    stream_name?: string;
-    stream_key?: string;
+    streamKeyHash?: string;
     token?: string;
-    remote_addr?: string;
+    action?: string;
+    publisherIp?: string;
+    // Legacy support: old endpoints using stream_name and RTMP_AUTH_TOKEN
+    stream_name?: string;
+    legacy_token?: string;
   };
 
   try {
@@ -27,54 +45,137 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { action, stream_name, token } = body;
+  const { streamKeyHash, token, action, publisherIp } = body;
 
-  if (!action || !stream_name || !token) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  // Validate inputs
+  if (!streamKeyHash || typeof streamKeyHash !== 'string' || !isValidStreamKeyHash(streamKeyHash)) {
+    return NextResponse.json(
+      { authorized: false, reason: 'invalid_stream_key_hash' },
+      { status: 403 },
+    );
   }
 
-  // Validate the RTMP auth token
-  const expectedToken = process.env.RTMP_AUTH_TOKEN;
-  if (!expectedToken || token !== expectedToken) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!token || typeof token !== 'string' || !isValidRtmpToken(token)) {
+    return NextResponse.json(
+      { authorized: false, reason: 'invalid_token' },
+      { status: 403 },
+    );
   }
 
-  // For publish requests, verify the stream name is a valid active event
+  if (action !== 'publish' && action !== 'play') {
+    return NextResponse.json(
+      { authorized: false, reason: 'invalid_action' },
+      { status: 403 },
+    );
+  }
+
+  // Lookup event by streamKeyHash
+  const event = await prisma.event.findUnique({
+    where: { rtmpStreamKeyHash: streamKeyHash },
+  });
+
+  if (!event) {
+    return NextResponse.json(
+      { authorized: false, reason: 'stream_key_not_found' },
+      { status: 403 },
+    );
+  }
+
+  // Check if event is active
+  if (!event.isActive) {
+    return NextResponse.json(
+      { authorized: false, reason: 'event_deactivated' },
+      { status: 403 },
+    );
+  }
+
+  // Check if event's channel (if exists) is active
+  if (event.channelId) {
+    const channel = await prisma.channel.findUnique({
+      where: { id: event.channelId },
+      select: { isActive: true },
+    });
+    if (!channel?.isActive) {
+      return NextResponse.json(
+        { authorized: false, reason: 'channel_deactivated' },
+        { status: 403 },
+      );
+    }
+  }
+
+  // Verify RTMP token matches
+  if (token !== event.rtmpToken) {
+    return NextResponse.json(
+      { authorized: false, reason: 'invalid_token' },
+      { status: 403 },
+    );
+  }
+
+  // Check token expiry
+  const now = new Date();
+  if (event.rtmpTokenExpiresAt && event.rtmpTokenExpiresAt < now) {
+    return NextResponse.json(
+      { authorized: false, reason: 'token_expired' },
+      { status: 403 },
+    );
+  }
+
+  // For PUBLISH action: check single-publisher enforcement
   if (action === 'publish') {
-    const event = await prisma.event.findUnique({
-      where: { id: stream_name },
-      select: { id: true, isActive: true, autoPurge: true, channel: { select: { isActive: true } } },
+    const activeSessions = await prisma.rtmpSession.findMany({
+      where: {
+        eventId: event.id,
+        endedAt: null,
+      },
     });
 
-    if (!event) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (activeSessions.length > 0) {
+      return NextResponse.json(
+        { authorized: false, reason: 'already_streaming' },
+        { status: 403 },
+      );
     }
 
-    if (!event.isActive) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    // Create RTMP session to track active publisher
+    try {
+      await prisma.rtmpSession.create({
+        data: {
+          eventId: event.id,
+          rtmpPublisherIp: publisherIp || 'unknown',
+        },
+      });
+    } catch (error) {
+      console.error(`Failed to create RTMP session for event ${event.id}:`, error);
+      return NextResponse.json(
+        { authorized: false, reason: 'internal_error' },
+        { status: 500 },
+      );
     }
 
-    // If event belongs to a channel, verify channel is active
-    if (event.channel && !event.channel.isActive) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
-    // Auto-purge: clear stale segments before the new stream starts
+    // Auto-purge stale segments before new stream starts
     if (event.autoPurge) {
       try {
-        const hlsBaseUrl = env.HLS_SERVER_BASE_URL;
-        await fetch(`${hlsBaseUrl}/admin/cache/${stream_name}`, {
-          method: 'DELETE',
-          headers: { 'X-Internal-Api-Key': env.INTERNAL_API_KEY },
-          signal: AbortSignal.timeout(5000),
-        });
+        const hlsBaseUrl = process.env.HLS_SERVER_BASE_URL;
+        const internalKey = process.env.INTERNAL_API_KEY;
+        if (hlsBaseUrl && internalKey) {
+          await fetch(`${hlsBaseUrl}/admin/cache/${event.id}`, {
+            method: 'DELETE',
+            headers: { 'X-Internal-Api-Key': internalKey },
+            signal: AbortSignal.timeout(5000),
+          });
+        }
       } catch (error) {
-        // Best-effort: don't block publish if purge fails
-        console.error(`Auto-purge failed for event ${stream_name}:`, error);
+        console.error(`Auto-purge failed for event ${event.id}:`, error);
       }
     }
   }
 
-  // Allow the request
-  return NextResponse.json({ status: 'ok' }, { status: 200 });
+  // Authorization successful — return event metadata
+  return NextResponse.json({
+    authorized: true,
+    eventId: event.id,
+    eventTitle: event.title,
+    storagePath: `/streams/${event.id}/`,
+    rtmpTokenExpiresAt: event.rtmpTokenExpiresAt,
+  }, { status: 200 });
 }

@@ -174,7 +174,13 @@ model Event {
   channelId   String?
   channel     Channel?  @relation(fields: [channelId], references: [id], onDelete: SetNull)
 
-  tokens Token[]
+  // RTMP ingest authentication — per-event token + stream key hash
+  rtmpStreamKeyHash String?    @unique      // Hashed stream key for RTMP publish (e.g., slug-based)
+  rtmpToken         String?    @unique      // HMAC-based 24-char base62 token (encrypted at rest)
+  rtmpTokenExpiresAt DateTime?              // Computed: event.endsAt (auto-renewed with event extension)
+
+  tokens         Token[]
+  rtmpSessions   RtmpSession[]
 
   @@index([channelId])
 }
@@ -213,6 +219,23 @@ model ActiveSession {
   @@index([tokenId])
   @@index([sessionId])
   @@index([lastHeartbeat])
+}
+
+/// Audit trail for active RTMP publishers per event.
+/// Tracks single-publisher enforcement and publisher IP logging.
+/// When an RTMP stream ends, endedAt is set (no hard delete for audit trail).
+model RtmpSession {
+  id            String   @id @default(uuid())
+  eventId       String
+  rtmpPublisherIp String  // Publisher IP address for audit trail
+  startedAt     DateTime @default(now())
+  endedAt       DateTime? // Null while streaming; set to now() on disconnect
+  createdAt     DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@index([endedAt]) // Fast query for active sessions: WHERE endedAt IS NULL
 }
 
 model SystemSettings {

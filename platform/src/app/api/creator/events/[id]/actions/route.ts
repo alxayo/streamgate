@@ -1,11 +1,12 @@
 // =========================================================================
-// Creator API: Event Actions — Convert to VOD / Purge Cache
+// Creator API: Event Actions — Convert to VOD / Purge Cache / Rotate RTMP Token
 // =========================================================================
 // POST /api/creator/events/:id/actions
 //
 // Supports:
-//   { action: "convert-vod" }   — Changes streamType to VOD and deactivates the live event
-//   { action: "purge" }         — Deletes cached segments from HLS server
+//   { action: "convert-vod" }        — Changes streamType to VOD and deactivates the live event
+//   { action: "purge" }              — Deletes cached segments from HLS server
+//   { action: "rotate-rtmp-token" }  — Generates a new RTMP token for the event
 //
 // Scoped to the creator's channel.
 // =========================================================================
@@ -13,6 +14,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireCreator } from '@/lib/creator-session';
+import { generateRtmpToken } from '@/lib/rtmp-tokens';
+import crypto from 'crypto';
 
 export async function POST(
   request: NextRequest,
@@ -83,6 +86,29 @@ export async function POST(
       }
 
       return NextResponse.json({ success: true, message: 'Cache purged' });
+    }
+
+    case 'rotate-rtmp-token': {
+      // Generate a new RTMP token for the event
+      const newRtmpToken = generateRtmpToken(crypto.randomUUID(), event.title);
+      
+      const updated = await prisma.event.update({
+        where: { id },
+        data: {
+          rtmpToken: newRtmpToken,
+          rtmpTokenExpiresAt: event.endsAt,
+        },
+      });
+
+      return NextResponse.json({
+        data: {
+          id: updated.id,
+          rtmpToken: newRtmpToken, // Return the new token for admin display
+          rtmpStreamKeyHash: updated.rtmpStreamKeyHash,
+          rtmpTokenExpiresAt: updated.rtmpTokenExpiresAt,
+          message: 'RTMP token rotated successfully. Save the new token — it won\'t be displayed again.',
+        },
+      });
     }
 
     default:
