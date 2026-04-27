@@ -132,7 +132,7 @@ export default function NewUserPage() {
                 placeholder="user@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="bg-gray-50 border-gray-300"
+                className="bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400"
                 required
                 autoFocus
               />
@@ -148,14 +148,14 @@ export default function NewUserPage() {
                 placeholder="Min 12 characters (or auto-generated)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="bg-gray-50 border-gray-300"
+                className="bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400"
               />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="role">Role</Label>
               <Select value={role} onValueChange={setRole}>
-                <SelectTrigger className="bg-gray-50 border-gray-300">
+                <SelectTrigger className="bg-gray-50 border-gray-300 text-gray-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
