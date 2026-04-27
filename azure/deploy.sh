@@ -29,9 +29,42 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STREAMGATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# --- Verify container app is running after deployment ---
+verify_deployment() {
+  local app_name="$1"
+  local max_retries=12  # 2 minutes with 10s intervals
+  local retry=0
+
+  echo "  Verifying $app_name..."
+
+  while [ $retry -lt $max_retries ]; do
+    local status
+    status=$(az containerapp revision list \
+      --name "$app_name" \
+      -g "$RESOURCE_GROUP" \
+      --query "[?properties.active].properties.runningState" \
+      -o tsv 2>/dev/null | head -1)
+
+    if echo "$status" | grep -qi "Running"; then
+      echo "    ✓ $app_name is running"
+      return 0
+    fi
+
+    retry=$((retry + 1))
+    echo "    Waiting for $app_name to be ready... ($retry/$max_retries)"
+    sleep 10
+  done
+
+  echo "    ✗ WARNING: $app_name may not be running after deployment"
+  return 1
+}
+
+DEPLOY_WARNINGS=0
+
 # --- Configuration ---
 RESOURCE_GROUP="${RESOURCE_GROUP:-rg-rtmpgo}"
 LOCATION="${LOCATION:-eastus2}"
+IMAGE_TAG="v$(date +%s)"
 
 echo "============================================"
 echo "  StreamGate Azure Deployment"
@@ -175,7 +208,7 @@ echo ">>> Step 5/7: Building Docker images in ACR..."
 echo "    Building streamgate-platform..."
 az acr build \
   --registry "$ACR_NAME" \
-  --image streamgate-platform:latest \
+  --image "streamgate-platform:${IMAGE_TAG}" \
   --file "$STREAMGATE_ROOT/platform/Dockerfile" \
   "$STREAMGATE_ROOT" \
   --no-logs --output none
@@ -183,7 +216,7 @@ az acr build \
 echo "    Building streamgate-hls..."
 az acr build \
   --registry "$ACR_NAME" \
-  --image streamgate-hls:latest \
+  --image "streamgate-hls:${IMAGE_TAG}" \
   --file "$STREAMGATE_ROOT/hls-server/Dockerfile" \
   "$STREAMGATE_ROOT" \
   --no-logs --output none
@@ -282,8 +315,8 @@ DEPLOY_OUTPUT=$(az deployment group create \
     internalApiKey="$INTERNAL_API_KEY" \
     adminPasswordHash="$ADMIN_PASSWORD_HASH" \
     adminSessionSecret="$ADMIN_SESSION_SECRET" \
-    platformImage="${REGISTRY_LOGIN_SERVER}/streamgate-platform:latest" \
-    hlsServerImage="${REGISTRY_LOGIN_SERVER}/streamgate-hls:latest" \
+    platformImage="${REGISTRY_LOGIN_SERVER}/streamgate-platform:${IMAGE_TAG}" \
+    hlsServerImage="${REGISTRY_LOGIN_SERVER}/streamgate-hls:${IMAGE_TAG}" \
     hlsServerBaseUrl="$EFFECTIVE_HLS_BASE_URL" \
     corsAllowedOrigin="$EFFECTIVE_CORS_ORIGIN" \
     platformAppUrl="$EFFECTIVE_PLATFORM_APP_URL" \
@@ -336,15 +369,25 @@ fi
 echo ""
 echo ">>> Step 7/7: Verifying deployment..."
 
-PLATFORM_STATUS=$(az containerapp show --name "$PLATFORM_APP_NAME" --resource-group "$RESOURCE_GROUP" \
-  --query 'properties.runningStatus' --output tsv 2>/dev/null || echo "Unknown")
-HLS_STATUS=$(az containerapp show --name "$HLS_APP_NAME" --resource-group "$RESOURCE_GROUP" \
-  --query 'properties.runningStatus' --output tsv 2>/dev/null || echo "Unknown")
-
-echo "    streamgate-platform: $PLATFORM_STATUS"
-echo "    streamgate-hls:      $HLS_STATUS"
+verify_deployment "$PLATFORM_APP_NAME" || DEPLOY_WARNINGS=$((DEPLOY_WARNINGS + 1))
+verify_deployment "$HLS_APP_NAME" || DEPLOY_WARNINGS=$((DEPLOY_WARNINGS + 1))
 
 SUBSCRIPTION=$(az account show --query 'id' --output tsv)
+
+# --- Deployment Summary ---
+echo ""
+echo "=== Deployment Summary ==="
+echo "Image tag: $IMAGE_TAG"
+echo "Resources deployed:"
+for app in "$PLATFORM_APP_NAME" "$HLS_APP_NAME"; do
+  az containerapp show --name "$app" -g "$RESOURCE_GROUP" \
+    --query "{Name:name, Revision:properties.latestRevisionName, FQDN:properties.configuration.ingress.fqdn}" \
+    -o table 2>/dev/null
+done
+if [ "$DEPLOY_WARNINGS" -gt 0 ]; then
+  echo ""
+  echo "⚠ $DEPLOY_WARNINGS app(s) may not be running — check Azure Portal for details."
+fi
 
 echo ""
 echo "============================================"
