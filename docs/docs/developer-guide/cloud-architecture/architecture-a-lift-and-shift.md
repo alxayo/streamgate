@@ -379,6 +379,10 @@ With multiple Platform App replicas, in-memory rate limiters are per-instance. A
 
 For most events, the per-instance limits are sufficient as a deterrent.
 
+### Shared Secrets Management
+
+Shared secrets (e.g., `PLAYBACK_SIGNING_SECRET`) are stored in the platform's `SystemConfig` database table and served via `GET /api/internal/config`. In this topology, the HLS server can fetch secrets from the platform at startup rather than requiring them as duplicate env vars. Since both services share the Azure Files mount path to the same database, the platform is the single source of truth for secret management. Manage secrets in the admin console at `/admin/config`.
+
 ---
 
 ## Monitoring

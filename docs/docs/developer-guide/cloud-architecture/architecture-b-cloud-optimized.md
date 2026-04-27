@@ -447,6 +447,8 @@ Keeping one HLS Server replica (0.5 vCPU, 1 GiB) running continuously:
 
 **Rate limiters** (Platform App): In-memory `Map` per instance. With 2+ replicas, a client could bypass limits by hitting different instances.
 
+**Shared secrets**: The `PLAYBACK_SIGNING_SECRET` must be consistent across all HLS Server replicas. Rather than duplicating the secret in each container's env vars, the HLS server can fetch it from the platform at startup via `GET /api/internal/config` (authenticated with `INTERNAL_API_KEY`). The platform stores secrets in its `SystemConfig` database table, providing a single source of truth. This simplifies secret rotation — update once via the admin console at `/admin/config`, then restart HLS containers.
+
 **Fix** (optional): Add Azure Cache for Redis (Basic C0, ~$13/mo):
 
 ```bash

@@ -29,8 +29,8 @@ Deploy StreamGate (ticket-gated HLS streaming platform) into the **same Azure Co
    Viewer ─────────────────────────────▶    │   upstream proxy   │        │
    (Browser)        │                       └──────────────────┬─┘        │
    ticket code ─────────────────────▶ ┌────────────────────────┘         │
-                    │                 │           ▲ polls                 │
-                    │                 │           │ /api/revocations      │
+                    │                 │           ▲ polls revocations                 │
+                    │                 │           │ + fetches config        │
                     │                 │  ┌────────┴───────────┐           │
                     │                 └──▶ streamgate-platform│           │
                     │                    │ Next.js :3000      │           │
@@ -44,6 +44,18 @@ Deploy StreamGate (ticket-gated HLS streaming platform) into the **same Azure Co
 **Shared resources** (from rtmp-go): ACR, Storage Account, Managed Identity, VNet, Log Analytics
 
 **StreamGate-specific resources**: 2 Container Apps, 1 Azure Files share (segment cache), 1 storage mount
+
+### Shared Secrets via Config API
+
+The HLS server can fetch shared secrets (e.g., `PLAYBACK_SIGNING_SECRET`) from the Platform App at startup via `GET /api/internal/config`. This avoids duplicating secrets across container app environment variables — the platform's `SystemConfig` database table is the single source of truth. If `PLAYBACK_SIGNING_SECRET` is already set in the HLS server's environment, the remote fetch is skipped.
+
+```
+HLS Server startup → GET /api/internal/config?keys=PLAYBACK_SIGNING_SECRET
+                     (X-Internal-Api-Key header)
+                   ← { data: { PLAYBACK_SIGNING_SECRET: "..." } }
+```
+
+Secrets are managed in the admin console at `/admin/config` and seeded on first deploy with `npx prisma db seed`.
 
 ### Dynamic Stream Configuration
 
@@ -118,6 +130,8 @@ HLS_SERVER_FQDN="<from deploy output>" \
 ./dns-deploy.sh
 ```
 
+The deploy script tags images with a timestamp (`v<epoch>`) instead of `:latest`, ensuring each deployment creates a distinct, traceable revision. After deploying, the script runs health checks that poll each container app's revision status for up to 2 minutes and prints a deployment summary with FQDNs, revision names, and any warnings.
+
 ## First Login After Deployment
 
 1. Navigate to `https://<platform-fqdn>/admin`
@@ -128,6 +142,8 @@ HLS_SERVER_FQDN="<from deploy output>" \
 ## Secrets
 
 The deploy script auto-generates `PLAYBACK_SIGNING_SECRET`, `INTERNAL_API_KEY`, and `ADMIN_SESSION_SECRET` if not provided. **Save them** — they're printed during deployment and needed for redeployment.
+
+> **Config API alternative**: Instead of passing `PLAYBACK_SIGNING_SECRET` directly to the HLS server, you can omit it from the HLS container's env vars and let it fetch the secret from the platform at startup via `/api/internal/config`. This simplifies secret rotation — update once in the admin config page, then restart the HLS server.
 
 | Secret | Purpose | Generation |
 |--------|---------|------------|
@@ -331,6 +347,12 @@ Azure Container Apps mount Azure Files via SMB with aggressive attribute caching
 Check HLS server health: `curl https://<hls-fqdn>/health`
 Verify `INTERNAL_API_KEY` matches between platform and HLS server.
 The HLS server polls `PLATFORM_APP_URL/api/revocations` — ensure the platform app is reachable.
+
+### HLS server fails to start — missing PLAYBACK_SIGNING_SECRET
+If `PLAYBACK_SIGNING_SECRET` is not in the HLS server's env vars, it attempts to fetch it from the platform at startup. Check that `PLATFORM_APP_URL` and `INTERNAL_API_KEY` are set correctly, and that the platform app is running and reachable. View startup logs:
+```bash
+az containerapp logs show -n <hls-app> -g rg-rtmpgo --type console | grep "\[config\]"
+```
 
 ### HLS segments not found (404)
 Verify the HLS transcoder is writing to the `hls-output` share:

@@ -206,6 +206,7 @@ Same as [Architecture B, Option A (blobfuse2)](./architecture-b-cloud-optimized.
 - New API route or service for manifest rewriting with SAS token generation
 - Session token issuance (simpler than JWT — just needs to identify the viewer and event)
 - Revocation: Instead of the HLS Server revocation cache, revocation is enforced at the manifest level — revoked viewers get 403 on manifest requests, and their existing SAS tokens expire within minutes
+- Shared secrets (e.g., `PLAYBACK_SIGNING_SECRET` for any remaining JWT needs) are stored in the platform's `SystemConfig` table and exposed via `GET /api/internal/config`. The manifest rewriter can fetch them at startup the same way the HLS server does in Architecture A/B
 
 ### 5. HLS Server — Reduced Role or Removed
 
