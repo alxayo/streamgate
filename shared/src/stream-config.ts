@@ -45,8 +45,19 @@ export interface VP9Config {
   cpuUsed: number;
 }
 
+/**
+ * VP8 codec-specific encoding options.
+ * VP8 is the predecessor to VP9 — simpler but more compatible.
+ * - deadline: 'realtime' for live, 'good' for VOD (better quality)
+ * - cpuUsed: 0 = slowest/best quality, 5 = fastest/worst quality
+ */
+export interface VP8Config {
+  deadline: 'realtime' | 'good';
+  cpuUsed: number;
+}
+
 /** Supported video codec names. Only 'h264' is active today; others are future placeholders. */
-export type CodecName = 'h264' | 'av1' | 'vp9';
+export type CodecName = 'h264' | 'av1' | 'vp8' | 'vp9';
 
 /**
  * Render profile names — each maps to a fixed set of output renditions.
@@ -84,6 +95,8 @@ export interface TranscoderConfig {
   av1?: AV1Config;
   /** VP9-specific settings (future — optional). */
   vp9?: VP9Config;
+  /** VP8-specific settings (future — optional). */
+  vp8?: VP8Config;
 }
 
 // ---------------------------------------------------------------------------

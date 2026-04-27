@@ -181,6 +181,7 @@ model Event {
 
   tokens         Token[]
   rtmpSessions   RtmpSession[]
+  upload         Upload?        // VOD upload for this event (null for live-only events)
 
   @@index([channelId])
 }
@@ -243,7 +244,73 @@ model SystemSettings {
   transcoderDefaults String   // JSON: system-wide transcoder defaults
   playerDefaults     String   // JSON: system-wide player defaults
   creatorRegistrationMode String @default("open") // "open" | "approval" | "disabled"
+
+  // --- VOD Upload & Transcoding Settings ---
+  maxUploadSizeBytes  BigInt   @default(5368709120)  // Max upload file size in bytes (default: 5 GB)
+  enabledCodecs       String   @default("[\"h264\"]") // JSON array of enabled codec names for VOD transcoding
+  vodRenditions       String   @default("{\"h264\":[{\"label\":\"1080p\",\"width\":1920,\"height\":1080,\"videoBitrate\":\"5000k\",\"audioBitrate\":\"192k\"},{\"label\":\"720p\",\"width\":1280,\"height\":720,\"videoBitrate\":\"2500k\",\"audioBitrate\":\"128k\"},{\"label\":\"480p\",\"width\":854,\"height\":480,\"videoBitrate\":\"1000k\",\"audioBitrate\":\"96k\"}]}") // JSON: per-codec VOD rendition ladders
+
   updatedAt          DateTime @updatedAt
+}
+
+// =========================================================================
+// VOD Upload & Multi-Codec Transcoding
+// =========================================================================
+// When a creator uploads a video file for VOD, an Upload record tracks the
+// file metadata and overall transcoding status. One TranscodeJob is created
+// per enabled codec (e.g., H.264, AV1, VP9). Each job runs in its own
+// ephemeral Azure Container Instance. The Upload is READY only when ALL
+// of its TranscodeJobs reach COMPLETED status.
+// =========================================================================
+
+/// Tracks a video file uploaded by a creator/admin for VOD transcoding.
+/// Each event can have at most one upload at a time. When a creator uploads
+/// a video, this record tracks the file metadata and overall transcoding status.
+/// Status lifecycle: UPLOADING → UPLOADED → TRANSCODING → READY (or FAILED at any step).
+model Upload {
+  id           String    @id @default(uuid())  // Unique identifier (UUID v4)
+  eventId      String    @unique               // One upload per event (FK → Event)
+  fileName     String                          // Original filename (e.g., "my-video.mp4")
+  fileSize     BigInt                          // File size in bytes
+  mimeType     String                          // MIME type (e.g., "video/mp4")
+  blobPath     String                          // Path in Azure Blob: "uploads/{eventId}/{filename}"
+  status       String    @default("UPLOADING") // UPLOADING | UPLOADED | TRANSCODING | READY | FAILED
+  errorMessage String?                         // Human-readable error if status is FAILED
+  duration     Float?                          // Video duration in seconds (set after transcoding)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relation: each upload belongs to exactly one event (cascade delete with the event)
+  event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  // Relation: one TranscodeJob per codec (H.264, AV1, VP8, VP9)
+  transcodeJobs TranscodeJob[]
+
+  @@index([eventId])  // Fast lookup by event
+  @@index([status])   // Fast filtering by upload status
+}
+
+/// Tracks a single codec transcoding job within an upload.
+/// When a video is uploaded, one TranscodeJob is created per enabled codec
+/// (e.g., H.264, AV1, VP9). Each job runs in its own ephemeral ACI container.
+/// The parent Upload is READY only when ALL jobs reach COMPLETED status.
+model TranscodeJob {
+  id                String    @id @default(uuid())  // Unique identifier (UUID v4)
+  uploadId          String                           // FK → Upload
+  codec             String                           // Codec name: "h264" | "av1" | "vp8" | "vp9"
+  status            String    @default("PENDING")    // PENDING | RUNNING | COMPLETED | FAILED
+  progress          Int?                             // Transcoding progress 0-100 (updated via callback)
+  aciContainerGroup String?                          // Azure Container Instance name (for cleanup)
+  errorMessage      String?                          // Error details if FAILED
+  startedAt         DateTime?                        // When the ACI container started
+  completedAt       DateTime?                        // When transcoding finished (success or failure)
+  createdAt         DateTime  @default(now())
+
+  // Relation: each job belongs to one upload (cascade delete with the upload)
+  upload Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([uploadId])  // Fast lookup of all jobs for an upload
+  @@index([status])    // Fast filtering by job status
+  @@index([codec])     // Fast filtering by codec type
 }
 
 /// Shared configuration key-value store.
