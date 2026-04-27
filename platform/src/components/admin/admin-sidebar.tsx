@@ -18,7 +18,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CalendarDays, Ticket, LayoutDashboard, Settings, LogOut, X, Users, ScrollText, Tv } from 'lucide-react';
+import { CalendarDays, Ticket, LayoutDashboard, Settings, LogOut, X, Users, ScrollText, Tv, KeyRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import type { Permission } from '@/lib/permissions';
@@ -39,6 +39,7 @@ const navItems: NavItem[] = [
   { href: '/admin/events', label: 'Events', icon: CalendarDays },
   { href: '/admin/tokens', label: 'Tokens', icon: Ticket },
   { href: '/admin/creators', label: 'Creators', icon: Tv, requiredPermission: 'creators:view' },
+  { href: '/admin/config', label: 'Shared Secrets', icon: KeyRound, requiredPermission: 'settings:manage' },
   { href: '/admin/settings', label: 'Settings', icon: Settings, requiredPermission: 'settings:manage' },
   { href: '/admin/users', label: 'Users', icon: Users, requiredPermission: 'users:manage' },
   { href: '/admin/audit-log', label: 'Audit Log', icon: ScrollText, requiredPermission: 'audit:view' },

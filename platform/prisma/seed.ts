@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 
-const dbPath = path.resolve(process.cwd(), 'prisma', 'dev.db');
+const dbPath = path.resolve(process.cwd(), 'dev.db');
 const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
 const prisma = new PrismaClient({ adapter });
 
@@ -18,8 +18,44 @@ function generateCode(): string {
   return code;
 }
 
+const SHARED_SECRETS = [
+  { key: 'INTERNAL_API_KEY', generate: () => crypto.randomBytes(24).toString('base64') },
+  { key: 'PLAYBACK_SIGNING_SECRET', generate: () => crypto.randomBytes(32).toString('hex') },
+  { key: 'RTMP_AUTH_TOKEN', generate: () => crypto.randomBytes(24).toString('base64') },
+];
+
+async function seedSystemConfig() {
+  console.log('Seeding SystemConfig...');
+
+  for (const secret of SHARED_SECRETS) {
+    const existing = await prisma.systemConfig.findUnique({ where: { key: secret.key } });
+
+    if (existing) {
+      console.log(`  ${secret.key}: already set (skipping)`);
+      continue;
+    }
+
+    // Use env var value if set, otherwise generate a new random value
+    const envValue = process.env[secret.key];
+    if (envValue) {
+      await prisma.systemConfig.create({ data: { key: secret.key, value: envValue } });
+      console.log(`  ${secret.key}: imported from environment variable`);
+      continue;
+    }
+
+    const value = secret.generate();
+    await prisma.systemConfig.create({ data: { key: secret.key, value } });
+    console.log(`  ${secret.key}: generated new value`);
+  }
+
+  console.log('SystemConfig seed complete.\n');
+}
+
 async function seed() {
   console.log('Seeding database...\n');
+
+  await seedSystemConfig();
+
   // Seed system settings (singleton)
   const transcoderDefaults = JSON.stringify({
     codecs: ['h264'],
