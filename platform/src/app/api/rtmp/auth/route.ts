@@ -122,6 +122,17 @@ export async function POST(request: NextRequest) {
 
   // For PUBLISH action: check single-publisher enforcement
   if (action === 'publish') {
+    // Auto-expire stale sessions older than 12 hours (safety net for missed disconnects)
+    const staleThreshold = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    await prisma.rtmpSession.updateMany({
+      where: {
+        eventId: event.id,
+        endedAt: null,
+        startedAt: { lt: staleThreshold },
+      },
+      data: { endedAt: staleThreshold },
+    });
+
     const activeSessions = await prisma.rtmpSession.findMany({
       where: {
         eventId: event.id,
