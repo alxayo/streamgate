@@ -89,6 +89,67 @@ model AuditLog {
   @@index([createdAt]) // Sort/paginate by time
 }
 
+// =========================================================================
+// Creator & Channel Management — Multi-Tenant Content Creator System
+// =========================================================================
+// Creators are self-service users who own channels and manage their own
+// events/tokens. They have a separate auth system from admins (different
+// cookie, login page, and middleware). Admins retain full oversight and
+// can suspend creators or channels at any time.
+// =========================================================================
+
+/// A content creator who owns one or more channels.
+/// Creators register themselves, manage their own events/tokens/VODs,
+/// and have a separate login system from administrators.
+model Creator {
+  id              String    @id @default(uuid())
+  email           String    @unique             // Login identifier
+  passwordHash    String                        // bcrypt-hashed password (12 salt rounds)
+  displayName     String                        // Public-facing name
+
+  isActive        Boolean   @default(true)      // Admin can suspend (blocks login + stream access)
+  isEmailVerified Boolean   @default(false)     // For future email verification gating
+  isPendingApproval Boolean @default(false)     // True when registered under 'approval' mode
+
+  // Optional TOTP 2FA (same encryption as AdminUser — AES-256-GCM)
+  totpSecret      String?                       // Encrypted TOTP secret
+  totpEnabled     Boolean   @default(false)
+
+  // Account lockout (brute-force protection)
+  failedLoginAttempts Int       @default(0)     // Consecutive failed password attempts
+  lockedUntil         DateTime?                 // Account locked until this time (null = not locked)
+
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  channels Channel[]  // Channels owned by this creator
+
+  @@index([email])
+}
+
+/// A content channel owned by a creator.
+/// Channels are the namespace for events — each event belongs to at most
+/// one channel. Channels can be independently suspended by admins.
+model Channel {
+  id          String   @id @default(uuid())
+  creatorId   String                            // Owner (FK → Creator)
+  name        String                            // Display name
+  slug        String   @unique                  // URL-safe identifier (e.g., "tech-talks")
+  description String?                           // Channel description
+  logoUrl     String?                           // Channel branding image
+
+  isActive    Boolean  @default(true)           // Admin can suspend
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  events  Event[]   // Events belonging to this channel
+
+  @@index([creatorId])
+  @@index([slug])
+}
+
 // --- Streaming Platform ---
 
 model Event {
@@ -109,7 +170,13 @@ model Event {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  // Channel ownership (nullable for backward compat — null = platform-level admin event)
+  channelId   String?
+  channel     Channel?  @relation(fields: [channelId], references: [id], onDelete: SetNull)
+
   tokens Token[]
+
+  @@index([channelId])
 }
 
 model Token {
@@ -149,8 +216,9 @@ model ActiveSession {
 }
 
 model SystemSettings {
-  id                String   @id @default("default")
-  transcoderDefaults String  // JSON: system-wide transcoder defaults
-  playerDefaults     String  // JSON: system-wide player defaults
+  id                 String   @id @default("default")
+  transcoderDefaults String   // JSON: system-wide transcoder defaults
+  playerDefaults     String   // JSON: system-wide player defaults
+  creatorRegistrationMode String @default("open") // "open" | "approval" | "disabled"
   updatedAt          DateTime @updatedAt
 }
