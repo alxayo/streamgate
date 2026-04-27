@@ -722,6 +722,234 @@ curl http://localhost:3000/api/admin/dashboard -b cookies.txt
 
 ---
 
+## Creator API
+
+Self-service endpoints for content creators. Authenticated via `creator_session` cookie (iron-session). All event/token operations are scoped to the creator's active channel.
+
+### POST /api/creator/register
+
+Creates a new creator account + default channel.
+
+**Rate limit:** 5 registrations/hour per IP
+
+**Request:**
+
+```json
+{
+  "email": "creator@example.com",
+  "password": "securepass123",
+  "displayName": "My Channel"
+}
+```
+
+**Success Response (201):**
+
+```json
+{
+  "data": { "id": "uuid", "email": "creator@example.com", "displayName": "My Channel" },
+  "channel": { "id": "uuid", "slug": "my-channel" }
+}
+```
+
+**Error Responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Invalid email, password < 8 chars, or display name < 2 chars |
+| `403` | Registration is disabled (`creatorRegistrationMode = "disabled"`) |
+| `409` | Email already registered |
+| `429` | Rate limited |
+
+---
+
+### POST /api/creator/login
+
+Authenticates a creator and creates a session cookie.
+
+**Rate limit:** 10 attempts/minute per IP
+
+**Request:**
+
+```json
+{ "email": "creator@example.com", "password": "securepass123" }
+```
+
+**Success Response (200):**
+
+```json
+{ "success": true }
+```
+
+**Error Responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `401` | Invalid credentials |
+| `403` | Account suspended or pending approval |
+| `423` | Account locked (too many failed attempts) |
+| `429` | Rate limited |
+
+---
+
+### GET /api/creator/session
+
+Returns current creator session data (for frontend auth check).
+
+---
+
+### POST /api/creator/logout
+
+Destroys the creator session cookie.
+
+---
+
+### GET /api/creator/channel
+
+Returns the creator's active channel info + stats.
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "name": "My Channel",
+    "slug": "my-channel",
+    "description": "Tech livestreams",
+    "stats": { "totalEvents": 5, "totalTokens": 120 }
+  }
+}
+```
+
+---
+
+### PATCH /api/creator/channel
+
+Updates channel details (name, description, logoUrl).
+
+---
+
+### GET /api/creator/events
+
+Lists events belonging to the creator's channel. Supports `?status=active|inactive|upcoming|past` and `?page=&limit=` pagination.
+
+---
+
+### POST /api/creator/events
+
+Creates a new event for the creator's channel.
+
+**Request:**
+
+```json
+{
+  "title": "Friday Livestream",
+  "streamType": "LIVE",
+  "startsAt": "2025-04-01T18:00:00Z",
+  "endsAt": "2025-04-01T20:00:00Z",
+  "accessWindowHours": 48
+}
+```
+
+---
+
+### GET /api/creator/events/:id
+
+Returns a single event (scoped to creator's channel).
+
+### PATCH /api/creator/events/:id
+
+Updates event fields (title, dates, isActive, etc.).
+
+### DELETE /api/creator/events/:id
+
+Soft-deletes (deactivates) an event.
+
+---
+
+### GET /api/creator/events/:id/tokens
+
+Lists tokens for a creator's event. Supports pagination.
+
+### POST /api/creator/events/:id/tokens
+
+Generates new tokens for the event.
+
+**Request:**
+
+```json
+{ "count": 50, "label": "VIP Batch" }
+```
+
+---
+
+### GET /api/creator/events/:id/stream-config
+
+Returns RTMP/SRT ingest credentials for the event.
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "ingest": {
+      "rtmp": {
+        "url": "rtmp://stream.example.com:1935/live/EVENT_UUID?token=TOKEN",
+        "server": "rtmp://stream.example.com:1935",
+        "streamKey": "live/EVENT_UUID?token=TOKEN"
+      },
+      "srt": null,
+      "key": "live/EVENT_UUID",
+      "token": "TOKEN"
+    }
+  }
+}
+```
+
+---
+
+### POST /api/creator/events/:id/actions
+
+Performs event actions: `convert-vod` or `purge`.
+
+**Request:**
+
+```json
+{ "action": "convert-vod" }
+```
+
+---
+
+### Admin: GET /api/admin/creators
+
+Lists all creators (requires `creators:view` permission). Supports `?search=&status=active|suspended` and pagination.
+
+### Admin: PATCH /api/admin/creators/:id
+
+Suspend, unsuspend, approve, or unlock a creator (requires `creators:manage` permission).
+
+```json
+{ "approve": true }
+{ "isActive": false }
+{ "unlock": true }
+```
+
+---
+
+### Admin: GET /api/admin/channels
+
+Lists all channels (requires `channels:view` permission). Supports search and pagination.
+
+### Admin: PATCH /api/admin/channels/:id
+
+Suspend/unsuspend a channel (requires `channels:manage` permission).
+
+```json
+{ "isActive": false }
+```
+
+---
+
 ## Internal API
 
 Used by the HLS Media Server and HLS Transcoder for revocation synchronization and stream configuration. Authenticated via `X-Internal-Api-Key` header.

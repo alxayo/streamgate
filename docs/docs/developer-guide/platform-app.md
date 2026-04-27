@@ -5,18 +5,19 @@ title: Platform App
 
 # Platform App
 
-The Platform App is a **Next.js 14+** application serving three roles:
+The Platform App is a **Next.js 14+** application serving four roles:
 
 1. **Viewer Portal** — Public-facing token entry and HLS video player
 2. **Admin Console** — Protected event and token management at `/admin`
-3. **API Backend** — REST endpoints for token validation, JWT lifecycle, and admin CRUD
+3. **Creator Portal** — Self-service event/token management for content creators at `/creator`
+4. **API Backend** — REST endpoints for token validation, JWT lifecycle, admin CRUD, and creator self-service
 
 ## Directory Structure
 
 ```
 platform/
 ├── prisma/
-│   └── schema.prisma          # Database schema (Event, Token, ActiveSession, SystemSettings, AdminUser, RecoveryCode, AuditLog)
+│   └── schema.prisma          # Database schema (Event, Token, ActiveSession, SystemSettings, AdminUser, RecoveryCode, AuditLog, Creator, Channel)
 ├── src/
 │   ├── app/                   # Next.js App Router
 │   │   ├── page.tsx           # Viewer Portal entry page
@@ -26,9 +27,16 @@ platform/
 │   │   │   ├── layout.tsx     # Admin layout with permission-aware sidebar
 │   │   │   ├── setup-2fa/     # TOTP enrollment wizard (4-step)
 │   │   │   ├── users/         # User management (list, create, edit)
+│   │   │   ├── creators/      # Creator & channel management
 │   │   │   ├── audit-log/     # Audit log viewer with filters
-│   │   │   ├── settings/      # System-wide stream settings page
+│   │   │   ├── settings/      # System-wide stream settings + registration mode
 │   │   │   └── events/[id]/   # Event detail with ingest + config cards
+│   │   ├── creator/           # Creator Portal pages
+│   │   │   ├── layout.tsx     # Creator layout with sidebar navigation
+│   │   │   ├── page.tsx       # Creator dashboard (channel stats)
+│   │   │   ├── login/         # Creator login page
+│   │   │   ├── register/      # Creator registration page
+│   │   │   └── events/        # Event list + detail (CRUD, tokens, ingest)
 │   │   └── api/               # API Routes
 │   │       ├── admin/         # Admin CRUD endpoints (session auth required)
 │   │       │   ├── login/     # POST — username/password → login token
@@ -38,11 +46,20 @@ platform/
 │   │       │   ├── session/   # GET — session status + permissions, DELETE — logout
 │   │       │   ├── 2fa/       # POST setup, confirm, reset
 │   │       │   ├── users/     # GET/POST + /:id (GET/PATCH/DELETE) — user CRUD
+│   │       │   ├── creators/  # GET + /:id (GET/PATCH) — creator management
+│   │       │   ├── channels/  # GET + /:id (GET/PATCH) — channel management
 │   │       │   ├── audit-log/ # GET — paginated audit log query
 │   │       │   ├── events/    # GET/POST + /:id (GET/PUT/DELETE + actions)
 │   │       │   ├── tokens/    # GET, PATCH /:id/revoke|unrevoke, bulk-revoke
-│   │       │   ├── settings/  # GET/PUT — system-wide stream defaults
+│   │       │   ├── settings/  # GET/PUT — system-wide stream defaults + registration mode
 │   │       │   └── dashboard/ # GET — dashboard stats
+│   │       ├── creator/       # Creator self-service endpoints (session auth required)
+│   │       │   ├── login/     # POST — email/password → creator session
+│   │       │   ├── register/  # POST — email/password/name → creator + channel
+│   │       │   ├── logout/    # POST — destroy session
+│   │       │   ├── session/   # GET — check session status
+│   │       │   ├── channel/   # GET/PATCH — channel info + update
+│   │       │   └── events/    # GET/POST + /:id (GET/PATCH/DELETE + tokens + actions + stream-config)
 │   │       ├── internal/      # Internal endpoints (X-Internal-Api-Key auth)
 │   │       │   ├── stream-config/defaults/ # GET — system defaults for transcoder
 │   │       │   └── events/[id]/stream-config/ # GET — per-event merged config
@@ -58,7 +75,9 @@ platform/
 │   │   └── viewer/            # Viewer flow components
 │   ├── hooks/                 # Custom React hooks
 │   ├── lib/                   # Utility modules
-│   │   ├── admin-session.ts   # iron-session config (dual-mode: full + pending-2FA)
+│   │   ├── admin-session.ts   # iron-session config for admin (dual-mode: full + pending-2FA)
+│   │   ├── creator-session.ts # iron-session config for creators (separate cookie from admin)
+│   │   ├── registration-mode.ts # Fetches creatorRegistrationMode from SystemSettings
 │   │   ├── permissions.ts     # RBAC permission matrix and helpers
 │   │   ├── require-permission.ts # API route permission guard
 │   │   ├── totp-crypto.ts    # AES-256-GCM encrypt/decrypt for TOTP secrets

@@ -33,6 +33,11 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'doc',
+      id: 'user-guide/creator-portal',
+      label: 'Creator Portal',
+    },
+    {
+      type: 'doc',
       id: 'user-guide/streaming-with-ffmpeg',
       label: 'Live Streaming with FFmpeg',
     },

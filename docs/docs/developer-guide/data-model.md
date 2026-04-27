@@ -5,7 +5,7 @@ title: Data Model
 
 # Data Model
 
-StreamGate uses **Prisma ORM** with seven models: `Event`, `Token`, `ActiveSession`, `SystemSettings`, `AdminUser`, `RecoveryCode`, and `AuditLog`. The schema is defined in `platform/prisma/schema.prisma`.
+StreamGate uses **Prisma ORM** with nine models: `Event`, `Token`, `ActiveSession`, `SystemSettings`, `AdminUser`, `RecoveryCode`, `AuditLog`, `Creator`, and `Channel`. The schema is defined in `platform/prisma/schema.prisma`.
 
 ## Entity Relationship Diagram
 
@@ -102,11 +102,81 @@ StreamGate uses **Prisma ORM** with seven models: `Event`, `Token`, `ActiveSessi
 ```
 
 **Relationships:**
+- A **Creator** has many **Channels** (one-to-many, cascade delete)
+- A **Channel** has many **Events** (one-to-many, set null on delete)
 - An **Event** has many **Tokens** (one-to-many, cascade delete)
 - A **Token** has many **ActiveSessions** (one-to-many, cascade delete)
 - An **AdminUser** has many **RecoveryCodes** (one-to-many, cascade delete)
 - An **AdminUser** has many **AuditLog** entries (one-to-many, set null on delete)
 - In practice, single-device enforcement means at most one ActiveSession per Token at any given time
+
+:::info Multi-Tenant Model
+Events can optionally belong to a **Channel** (via `channelId`). Events with `channelId = null` are platform-level admin events (backward compatible). When a channel is suspended, RTMP publish auth is rejected for all events in that channel.
+:::
+
+## Creator Model
+
+A content creator who owns one or more channels. Creators have a completely separate auth system from admins (different cookie, login page, middleware, and session management).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `String` | UUID (auto) | Primary key |
+| `email` | `String` | — | Login identifier (unique) |
+| `passwordHash` | `String` | — | bcrypt-hashed password (12 salt rounds) |
+| `displayName` | `String` | — | Public-facing display name |
+| `isActive` | `Boolean` | `true` | Admin can suspend (blocks login + stream access) |
+| `isEmailVerified` | `Boolean` | `false` | For future email verification gating |
+| `isPendingApproval` | `Boolean` | `false` | True when registered under "approval" mode |
+| `totpSecret` | `String?` | `null` | Encrypted TOTP secret (AES-256-GCM) |
+| `totpEnabled` | `Boolean` | `false` | Whether 2FA is active |
+| `failedLoginAttempts` | `Int` | `0` | Consecutive failed password attempts |
+| `lockedUntil` | `DateTime?` | `null` | Account locked until this time |
+| `lastLoginAt` | `DateTime?` | `null` | Last successful login |
+| `createdAt` | `DateTime` | `now()` | Registration timestamp |
+| `updatedAt` | `DateTime` | auto | Last modification timestamp |
+
+### Account Lockout
+
+After 5 consecutive failed login attempts, the account is locked for 15 minutes:
+
+```
+failedLoginAttempts >= 5 → lockedUntil = now + 15 minutes
+```
+
+A successful login resets `failedLoginAttempts` to 0 and clears `lockedUntil`. Admins can also unlock accounts from the Creators management page.
+
+### Registration Modes
+
+The `SystemSettings.creatorRegistrationMode` field controls self-service signup:
+
+| Mode | Behavior |
+|------|----------|
+| `open` | Account is immediately active; creator auto-logged in |
+| `approval` | Account created with `isPendingApproval=true`; cannot log in until admin approves |
+| `disabled` | Registration endpoint returns 403; only admins can create creator accounts |
+
+## Channel Model
+
+A content channel owned by a creator. Channels are the namespace for events — each event optionally belongs to one channel.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `String` | UUID (auto) | Primary key |
+| `creatorId` | `String` | — | Owner (FK → Creator) |
+| `name` | `String` | — | Display name |
+| `slug` | `String` | — | URL-safe identifier (unique), e.g., "tech-talks" |
+| `description` | `String?` | `null` | Channel description |
+| `logoUrl` | `String?` | `null` | Channel branding image URL |
+| `isActive` | `Boolean` | `true` | Admin can suspend (blocks RTMP publish for events in this channel) |
+| `createdAt` | `DateTime` | `now()` | Creation timestamp |
+| `updatedAt` | `DateTime` | auto | Last modification timestamp |
+
+### Channel Suspension
+
+When a channel's `isActive` is set to `false`:
+1. The RTMP auth callback (`/api/rtmp/auth`) checks `event.channel.isActive` during publish validation
+2. If the channel is suspended, publish requests return 403 → OBS/FFmpeg shows "connection rejected"
+3. Existing tokens for the channel's events remain valid for viewing (HLS server doesn't check channel status)
 
 ## Event Model
 
@@ -128,6 +198,7 @@ An event represents a streaming occasion — a live broadcast, recorded session,
 | `autoPurge` | `Boolean` | `true` | Whether to auto-purge expired tokens |
 | `transcoderConfig` | `String?` | `null` | JSON: per-event transcoder overrides (null = use system defaults) |
 | `playerConfig` | `String?` | `null` | JSON: per-event player overrides (null = use system defaults) |
+| `channelId` | `String?` | `null` | FK → Channel (null = platform-level admin event) |
 | `createdAt` | `DateTime` | `now()` | Creation timestamp |
 | `updatedAt` | `DateTime` | auto | Last modification timestamp |
 
@@ -257,6 +328,7 @@ A singleton model storing system-wide default configuration for stream transcodi
 | `id` | `String` | `"default"` | Singleton primary key |
 | `transcoderDefaults` | `String` | — | JSON: system-wide transcoder defaults (`TranscoderConfig`) |
 | `playerDefaults` | `String` | — | JSON: system-wide player defaults (`PlayerConfig`) |
+| `creatorRegistrationMode` | `String` | `"open"` | Creator signup mode: `"open"`, `"approval"`, or `"disabled"` |
 | `updatedAt` | `DateTime` | auto | Last modification timestamp |
 
 ### Stream Configuration Inheritance

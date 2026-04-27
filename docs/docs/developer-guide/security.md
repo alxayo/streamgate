@@ -227,6 +227,61 @@ On first server start, if no `AdminUser` records exist, a default `super_admin` 
 - Password: from `ADMIN_PASSWORD_HASH` environment variable
 - 2FA: Not yet enabled (user completes setup on first login)
 
+## Creator Authentication
+
+Creators use a **completely separate authentication system** from admins — different cookies, session configurations, middleware routes, and login pages. This separation prevents any privilege escalation between the two auth domains.
+
+### Session Management
+
+| Property | Value |
+|----------|-------|
+| Cookie name | `creator_session` |
+| Library | `iron-session` (encrypted, httpOnly, sameSite: lax) |
+| Secret | `ADMIN_SESSION_SECRET` env var (shared encryption key) |
+| TTL | 7 days |
+| Session data | `{ creatorId, channelId, email }` |
+
+### Password Security
+
+- Passwords hashed with **bcrypt** (12 salt rounds)
+- Minimum 8 characters enforced at registration
+- Passwords never logged or returned in API responses
+
+### Account Lockout
+
+To prevent brute-force attacks:
+
+| Threshold | Action |
+|-----------|--------|
+| 5 consecutive failed logins | Account locked for 15 minutes |
+| Successful login | Resets counter + clears lock |
+| Admin unlock | Immediate unlock via `/api/admin/creators/:id` |
+
+The `lockedUntil` timestamp is checked on every login attempt. If the current time is past `lockedUntil`, the lock auto-expires and the counter resets.
+
+### Rate Limiting
+
+| Endpoint | Limit | Scope |
+|----------|-------|-------|
+| `/api/creator/register` | 5/hour | Per IP |
+| `/api/creator/login` | 10/minute | Per IP |
+
+### Registration Modes
+
+Admins control creator self-registration via `SystemSettings.creatorRegistrationMode`:
+
+- **`open`** — Immediate access (auto-logged in after registration)
+- **`approval`** — Account created in `isPendingApproval` state; admin must approve via Creators page
+- **`disabled`** — Registration endpoint returns 403; only admins can create accounts
+
+### Middleware Protection
+
+The Next.js middleware (`src/middleware.ts`) protects `/creator/*` routes (excluding `/creator/login` and `/creator/register`). It reads the `creator_session` cookie and redirects unauthenticated users to `/creator/login`.
+
+### Channel Scoping
+
+All creator API endpoints enforce **channel scoping**: creators can only access events and tokens belonging to their own channel. The `channelId` is stored in the session and used as a mandatory filter on all database queries.
+
 ## Internal API Security
 
 The revocation sync endpoint (`GET /api/revocations`) is protected by a shared API key:
