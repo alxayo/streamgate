@@ -34,7 +34,11 @@ export type Permission =
   | 'settings:manage'
   | 'viewers:manage'
   | 'dashboard:view'
-  | 'audit:view';
+  | 'audit:view'
+  | 'creators:view'
+  | 'creators:manage'
+  | 'channels:view'
+  | 'channels:manage';
 
 /**
  * Maps each role to its allowed permissions.
@@ -50,6 +54,8 @@ const ROLE_PERMISSIONS: Record<AdminRole, Permission[]> = {
     'viewers:manage',
     'dashboard:view',
     'audit:view',
+    'creators:view', 'creators:manage',
+    'channels:view', 'channels:manage',
   ],
   ADMIN: [
     'events:create', 'events:edit', 'events:delete', 'events:view',
@@ -57,12 +63,16 @@ const ROLE_PERMISSIONS: Record<AdminRole, Permission[]> = {
     'settings:manage',
     'viewers:manage',
     'dashboard:view',
+    'creators:view', 'creators:manage',
+    'channels:view', 'channels:manage',
   ],
   OPERATOR: [
     'events:view',
     'tokens:view',
     'viewers:manage',
     'dashboard:view',
+    'creators:view',
+    'channels:view',
   ],
   VIEWER_MANAGER: [
     'events:view',

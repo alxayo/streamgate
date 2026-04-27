@@ -18,6 +18,7 @@ import {
   validatePlayerConfig,
 } from '@/lib/stream-config';
 import { checkPermission } from '@/lib/require-permission';
+import { getRegistrationMode, type RegistrationMode } from '@/lib/registration-mode';
 
 /**
  * GET /api/admin/settings
@@ -29,11 +30,13 @@ export async function GET() {
   if (denied) return denied;
 
   const defaults = await getSystemDefaults();
+  const registrationMode = await getRegistrationMode();
 
   return NextResponse.json({
     data: {
       transcoder: defaults.transcoder,
       player: defaults.player,
+      creatorRegistrationMode: registrationMode,
     },
   });
 }
@@ -51,7 +54,7 @@ export async function PUT(request: NextRequest) {
   if (denied) return denied;
 
   const body = await request.json();
-  const { transcoder, player } = body;
+  const { transcoder, player, creatorRegistrationMode } = body;
 
   // Validate transcoder config if provided
   if (transcoder !== undefined) {
@@ -75,8 +78,16 @@ export async function PUT(request: NextRequest) {
     }
   }
 
+  // Validate registration mode if provided
+  const validModes: RegistrationMode[] = ['open', 'approval', 'disabled'];
+  if (creatorRegistrationMode !== undefined && !validModes.includes(creatorRegistrationMode)) {
+    return NextResponse.json(
+      { error: 'Invalid registration mode. Must be: open, approval, or disabled.' },
+      { status: 400 },
+    );
+  }
+
   // Get current values so we can merge partial updates
-  // (e.g., if only player is sent, keep the existing transcoder config)
   const current = await getSystemDefaults();
 
   const updatedTranscoder = transcoder ?? current.transcoder;
@@ -89,10 +100,12 @@ export async function PUT(request: NextRequest) {
       id: 'default',
       transcoderDefaults: JSON.stringify(updatedTranscoder),
       playerDefaults: JSON.stringify(updatedPlayer),
+      ...(creatorRegistrationMode && { creatorRegistrationMode }),
     },
     update: {
       transcoderDefaults: JSON.stringify(updatedTranscoder),
       playerDefaults: JSON.stringify(updatedPlayer),
+      ...(creatorRegistrationMode && { creatorRegistrationMode }),
     },
   });
 
@@ -100,6 +113,7 @@ export async function PUT(request: NextRequest) {
     data: {
       transcoder: JSON.parse(settings.transcoderDefaults),
       player: JSON.parse(settings.playerDefaults),
+      creatorRegistrationMode: settings.creatorRegistrationMode,
     },
   });
 }

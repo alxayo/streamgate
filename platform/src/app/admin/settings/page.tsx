@@ -89,6 +89,9 @@ export default function AdminSettingsPage() {
     lowLatencyMode: true,
   });
 
+  // Creator registration mode
+  const [registrationMode, setRegistrationMode] = useState<'open' | 'approval' | 'disabled'>('open');
+
   // --- Load current settings on mount ---
   useEffect(() => {
     async function load() {
@@ -98,6 +101,7 @@ export default function AdminSettingsPage() {
           const { data } = await res.json();
           setTranscoder(data.transcoder);
           setPlayer(data.player);
+          if (data.creatorRegistrationMode) setRegistrationMode(data.creatorRegistrationMode);
         }
       } catch {
         setError('Failed to load settings');
@@ -118,13 +122,14 @@ export default function AdminSettingsPage() {
       const res = await fetch('/api/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcoder, player }),
+        body: JSON.stringify({ transcoder, player, creatorRegistrationMode: registrationMode }),
       });
 
       if (res.ok) {
         const { data } = await res.json();
         setTranscoder(data.transcoder);
         setPlayer(data.player);
+        if (data.creatorRegistrationMode) setRegistrationMode(data.creatorRegistrationMode);
         setSuccess('Settings saved successfully');
         // Clear success message after 3 seconds
         setTimeout(() => setSuccess(''), 3000);
@@ -367,6 +372,37 @@ export default function AdminSettingsPage() {
             />
             <span className="text-sm text-gray-900">Enable low-latency mode</span>
           </label>
+        </div>
+      </Section>
+
+      {/* ================================================================
+          CREATOR REGISTRATION SECTION
+          Controls whether new creators can self-register
+          ================================================================ */}
+      <Section title="Creator Registration">
+        <div className="space-y-1.5">
+          <Label className="text-gray-700">
+            Registration Mode
+            <Tooltip text="Controls whether new creators can sign up. 'Open' allows immediate access after registration. 'Approval' creates the account but requires admin approval before the creator can log in. 'Disabled' blocks all new registrations." />
+          </Label>
+          <Select
+            value={registrationMode}
+            onValueChange={(v) => setRegistrationMode(v as 'open' | 'approval' | 'disabled')}
+          >
+            <SelectTrigger className="w-[280px] bg-white border-gray-300 text-gray-900">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-white border-gray-200 text-gray-900">
+              <SelectItem value="open">Open (immediate access)</SelectItem>
+              <SelectItem value="approval">Approval Required (admin must approve)</SelectItem>
+              <SelectItem value="disabled">Disabled (no new registrations)</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-gray-500 mt-1">
+            {registrationMode === 'open' && 'New creators can register and start streaming immediately.'}
+            {registrationMode === 'approval' && 'New creators can register but must be approved before they can log in.'}
+            {registrationMode === 'disabled' && 'The registration page will show an error. Only admins can create new creator accounts.'}
+          </p>
         </div>
       </Section>
 
