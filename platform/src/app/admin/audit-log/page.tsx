@@ -39,7 +39,7 @@ interface AuditEntry {
 
 /** Dropdown options for filtering the audit log by action type */
 const ACTION_OPTIONS = [
-  { value: '', label: 'All actions' },
+  { value: 'all', label: 'All actions' },
   { value: 'login', label: 'Login' },
   { value: 'login_failed', label: 'Login failed' },
   { value: '2fa_setup', label: '2FA setup' },
@@ -70,7 +70,7 @@ export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [actionFilter, setActionFilter] = useState('');
+  const [actionFilter, setActionFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
@@ -78,7 +78,7 @@ export default function AuditLogPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '50' });
-      if (actionFilter) params.set('action', actionFilter);
+      if (actionFilter && actionFilter !== 'all') params.set('action', actionFilter);
 
       const res = await fetch(`/api/admin/audit-log?${params}`);
       if (!res.ok) {
@@ -110,7 +110,7 @@ export default function AuditLogPage() {
           value={actionFilter}
           onValueChange={(val) => { setActionFilter(val); setPage(1); }}
         >
-          <SelectTrigger className="w-[200px] bg-white border-gray-300">
+          <SelectTrigger className="w-[200px] bg-white border-gray-300 text-gray-900">
             <SelectValue placeholder="Filter by action" />
           </SelectTrigger>
           <SelectContent>
