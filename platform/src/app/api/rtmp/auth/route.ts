@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
   if (action === 'publish') {
     const event = await prisma.event.findUnique({
       where: { id: stream_name },
-      select: { id: true, isActive: true, autoPurge: true },
+      select: { id: true, isActive: true, autoPurge: true, channel: { select: { isActive: true } } },
     });
 
     if (!event) {
@@ -51,6 +51,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (!event.isActive) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // If event belongs to a channel, verify channel is active
+    if (event.channel && !event.channel.isActive) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

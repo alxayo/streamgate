@@ -19,7 +19,7 @@ export async function GET(
   // Validate code belongs to event (lightweight check, no rate limit)
   const token = await prisma.token.findFirst({
     where: { code, eventId },
-    include: { event: true },
+    include: { event: { include: { channel: { select: { name: true, slug: true, logoUrl: true } } } } },
   });
 
   if (!token) {
@@ -33,5 +33,10 @@ export async function GET(
     status,
     startsAt: token.event.startsAt.toISOString(),
     endsAt: token.event.endsAt.toISOString(),
+    channel: token.event.channel ? {
+      name: token.event.channel.name,
+      slug: token.event.channel.slug,
+      logoUrl: token.event.channel.logoUrl,
+    } : null,
   });
 }

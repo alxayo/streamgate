@@ -95,6 +95,9 @@ export async function GET(
           streamKey: streamKey + (rtmpToken ? `?token=${rtmpToken}` : ''),
         },
         srt: srtUrl ? { url: srtUrl } : null,
+        // Separate fields for easy display
+        key: streamKey,
+        token: rtmpToken || null,
       },
     },
   });

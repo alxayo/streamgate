@@ -74,6 +74,8 @@ export default function EventDetailPage() {
     ingest: {
       rtmp: { url: string; server: string; streamKey: string };
       srt: { url: string } | null;
+      key: string;
+      token: string | null;
     };
   } | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -292,6 +294,40 @@ export default function EventDetailPage() {
           <div className="flex items-center gap-2">
             <Radio className="h-4 w-4 text-red-500" />
             <h3 className="font-medium text-gray-900">Ingest Endpoints</h3>
+          </div>
+
+          {/* Stream Key & Token — prominent display */}
+          <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-blue-700 uppercase tracking-wider">Stream Key</p>
+              <div className="flex items-center gap-1">
+                <code className="flex-1 bg-white border border-blue-200 rounded px-3 py-1.5 text-sm font-mono text-gray-900 select-all">
+                  {streamConfig.ingest.key}
+                </code>
+                <button
+                  onClick={() => copyToClipboard(streamConfig.ingest.key, 'ingest-key')}
+                  className="p-1.5 text-blue-500 hover:text-blue-700 transition-colors shrink-0"
+                >
+                  {copiedField === 'ingest-key' ? <Check className="h-3.5 w-3.5 text-green-500" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+            {streamConfig.ingest.token && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-blue-700 uppercase tracking-wider">Stream Token</p>
+                <div className="flex items-center gap-1">
+                  <code className="flex-1 bg-white border border-blue-200 rounded px-3 py-1.5 text-sm font-mono text-gray-900 select-all">
+                    {streamConfig.ingest.token}
+                  </code>
+                  <button
+                    onClick={() => copyToClipboard(streamConfig.ingest.token!, 'ingest-token')}
+                    className="p-1.5 text-blue-500 hover:text-blue-700 transition-colors shrink-0"
+                  >
+                    {copiedField === 'ingest-token' ? <Check className="h-3.5 w-3.5 text-green-500" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* RTMP — full URL */}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Plus, MoreHorizontal, Archive, Power, Trash2, Edit, Users } from 'lucide-react';
+import { Plus, MoreHorizontal, Archive, Power, Trash2, Edit, Users, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EventStatusBadge } from './event-status-badge';
 import {
@@ -31,6 +31,13 @@ export function EventList() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('active');
   const [actionMenu, setActionMenu] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyStreamKey = (eventId: string) => {
+    navigator.clipboard.writeText(`live/${eventId}`);
+    setCopiedId(eventId);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   const fetchEvents = async () => {
     setLoading(true);
@@ -105,6 +112,7 @@ export function EventList() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Title</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Stream Key</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Starts</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Ends</th>
@@ -122,6 +130,22 @@ export function EventList() {
                     <Link href={`/admin/events/${event.id}`} className="text-sm font-medium text-accent-blue hover:underline">
                       {event.title}
                     </Link>
+                  </td>
+                  <td className="px-4 py-3">
+                    {event.streamType === 'LIVE' ? (
+                      <div className="flex items-center gap-1">
+                        <code className="text-xs font-mono text-gray-600 bg-gray-50 px-1.5 py-0.5 rounded">live/{event.id.slice(0, 8)}…</code>
+                        <button
+                          onClick={() => copyStreamKey(event.id)}
+                          className="p-0.5 text-gray-400 hover:text-gray-700"
+                          title="Copy full stream key"
+                        >
+                          {copiedId === event.id ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
