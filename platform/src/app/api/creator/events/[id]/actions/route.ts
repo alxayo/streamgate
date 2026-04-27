@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireCreator } from '@/lib/creator-session';
 import { generateRtmpToken } from '@/lib/rtmp-tokens';
+import { getConfigValue, requireConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 import crypto from 'crypto';
 
 export async function POST(
@@ -56,7 +57,7 @@ export async function POST(
     case 'purge': {
       // Delete cached HLS segments from the media server
       const hlsBaseUrl = process.env.HLS_SERVER_BASE_URL;
-      const apiKey = process.env.INTERNAL_API_KEY;
+      const apiKey = await getConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY);
 
       if (!hlsBaseUrl || !apiKey) {
         return NextResponse.json(
@@ -90,7 +91,8 @@ export async function POST(
 
     case 'rotate-rtmp-token': {
       // Generate a new RTMP token for the event
-      const newRtmpToken = generateRtmpToken(crypto.randomUUID(), event.title);
+      const signingSecret = await requireConfigValue(prisma, CONFIG_KEYS.PLAYBACK_SIGNING_SECRET);
+      const newRtmpToken = generateRtmpToken(crypto.randomUUID(), event.title, signingSecret);
       
       const updated = await prisma.event.update({
         where: { id },

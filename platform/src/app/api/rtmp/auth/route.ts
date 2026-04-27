@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isValidRtmpToken, isValidStreamKeyHash } from '@/lib/rtmp-tokens';
+import { getConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 /**
  * POST /api/rtmp/auth — Webhook for rtmp-go RTMP server auth validation
@@ -20,7 +21,7 @@ import { isValidRtmpToken, isValidStreamKeyHash } from '@/lib/rtmp-tokens';
 export async function POST(request: NextRequest) {
   // Validate internal API key from header
   const apiKey = request.headers.get('X-Internal-Api-Key');
-  const expectedKey = process.env.INTERNAL_API_KEY;
+  const expectedKey = await getConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY);
 
   if (!expectedKey || apiKey !== expectedKey) {
     return NextResponse.json(
@@ -167,7 +168,7 @@ export async function POST(request: NextRequest) {
     if (event.autoPurge) {
       try {
         const hlsBaseUrl = process.env.HLS_SERVER_BASE_URL;
-        const internalKey = process.env.INTERNAL_API_KEY;
+        const internalKey = await getConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY);
         if (hlsBaseUrl && internalKey) {
           await fetch(`${hlsBaseUrl}/admin/cache/${event.id}`, {
             method: 'DELETE',

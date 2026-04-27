@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma';
 import { isValidAccessWindow, isValidEventSchedule } from '@streaming/shared';
 import { requireCreator } from '@/lib/creator-session';
 import { generateRtmpToken, generateStreamKeyHash } from '@/lib/rtmp-tokens';
+import { requireConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 // GET /api/creator/events — List creator's events
 export async function GET(request: NextRequest) {
@@ -98,7 +99,8 @@ export async function POST(request: NextRequest) {
 
   // Generate event ID first, then derive RTMP tokens from it
   const eventId = crypto.randomUUID();
-  const rtmpToken = generateRtmpToken(eventId, title);
+  const signingSecret = await requireConfigValue(prisma, CONFIG_KEYS.PLAYBACK_SIGNING_SECRET);
+  const rtmpToken = generateRtmpToken(eventId, title, signingSecret);
   const rtmpStreamKeyHash = generateStreamKeyHash(eventId, title);
 
   const event = await prisma.event.create({

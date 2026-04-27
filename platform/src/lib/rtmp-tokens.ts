@@ -14,8 +14,8 @@ const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv
  * Generate a 24-character base62 RTMP token
  * Uses HMAC-based deterministic generation with event title for entropy
  */
-export function generateRtmpToken(eventId: string, eventTitle: string, secret?: string): string {
-  const hmacSecret = secret || (process.env.PLAYBACK_SIGNING_SECRET || 'dev-secret');
+export function generateRtmpToken(eventId: string, eventTitle: string, secret: string): string {
+  const hmacSecret = secret;
   
   // Create deterministic HMAC input from eventId + title
   const input = `${eventId}:${eventTitle}:rtmp`;

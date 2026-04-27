@@ -13,11 +13,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 export async function POST(request: NextRequest) {
   // Validate internal API key
   const apiKey = request.headers.get('X-Internal-Api-Key');
-  const expectedKey = process.env.INTERNAL_API_KEY;
+  const expectedKey = await getConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY);
 
   if (!expectedKey || apiKey !== expectedKey) {
     return NextResponse.json(

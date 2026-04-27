@@ -6,6 +6,7 @@ import { env } from '@/lib/env';
 import { validateTranscoderConfig, validatePlayerConfig } from '@/lib/stream-config';
 import { checkPermission } from '@/lib/require-permission';
 import { generateRtmpToken, generateStreamKeyHash } from '@/lib/rtmp-tokens';
+import { requireConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 // GET /api/admin/events — List all events with filters
 export async function GET(request: NextRequest) {
@@ -142,7 +143,8 @@ export async function POST(request: NextRequest) {
 
   // Generate event ID first, then derive RTMP tokens from it
   const eventId = crypto.randomUUID();
-  const rtmpToken = generateRtmpToken(eventId, title);
+  const signingSecret = await requireConfigValue(prisma, CONFIG_KEYS.PLAYBACK_SIGNING_SECRET);
+  const rtmpToken = generateRtmpToken(eventId, title, signingSecret);
   const rtmpStreamKeyHash = generateStreamKeyHash(eventId, title);
 
   const event = await prisma.event.create({

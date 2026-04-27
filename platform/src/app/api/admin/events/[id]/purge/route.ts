@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
+import { requireConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 // POST /api/admin/events/:id/purge — Purge all stream data for an event
 export async function POST(
@@ -20,7 +21,7 @@ export async function POST(
   try {
     const response = await fetch(`${hlsBaseUrl}/admin/cache/${id}`, {
       method: 'DELETE',
-      headers: { 'X-Internal-Api-Key': env.INTERNAL_API_KEY },
+      headers: { 'X-Internal-Api-Key': await requireConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY) },
       signal: AbortSignal.timeout(15000),
     });
 

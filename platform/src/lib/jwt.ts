@@ -6,9 +6,18 @@ import {
   JWT_ALGORITHM,
   buildStreamPathPrefix,
 } from '@streaming/shared';
-import { env } from './env';
+import { prisma } from './prisma';
+import { requireConfigValue, CONFIG_KEYS } from './system-config';
 
-const secret = new TextEncoder().encode(env.PLAYBACK_SIGNING_SECRET);
+// Cached signing secret (resolved once per process lifetime)
+let _cachedSecret: Uint8Array | null = null;
+
+async function getSigningSecret(): Promise<Uint8Array> {
+  if (_cachedSecret) return _cachedSecret;
+  const signingSecret = await requireConfigValue(prisma, CONFIG_KEYS.PLAYBACK_SIGNING_SECRET);
+  _cachedSecret = new TextEncoder().encode(signingSecret);
+  return _cachedSecret;
+}
 
 /**
  * Mint a playback JWT for a validated token (PDR §4.3).
@@ -20,6 +29,7 @@ export async function mintPlaybackToken(
   sessionId: string,
 ): Promise<{ token: string; expiresIn: number }> {
   const sp = buildStreamPathPrefix(eventId);
+  const secret = await getSigningSecret();
   const token = await new SignJWT({
     sub: code,
     eid: eventId,
@@ -38,6 +48,7 @@ export async function mintPlaybackToken(
  * Mint a short-lived probe JWT for stream status checking (PDR §10.1).
  */
 export async function mintProbeToken(eventId: string): Promise<string> {
+  const secret = await getSigningSecret();
   const sp = buildStreamPathPrefix(eventId);
   return new SignJWT({
     eid: eventId,
@@ -54,7 +65,8 @@ export async function mintProbeToken(eventId: string): Promise<string> {
  * Verify and decode a playback JWT.
  */
 export async function verifyPlaybackToken(token: string): Promise<PlaybackTokenClaims> {
-  const { payload } = await jwtVerify(token, secret, {
+  const signingSecret = await getSigningSecret();
+  const { payload } = await jwtVerify(token, signingSecret, {
     algorithms: [JWT_ALGORITHM],
   });
   return payload as unknown as PlaybackTokenClaims;

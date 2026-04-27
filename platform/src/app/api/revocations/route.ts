@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 // GET /api/revocations — Internal endpoint for HLS server revocation sync
 export async function GET(request: NextRequest) {
   // Authenticate with internal API key
   const apiKey = request.headers.get('x-internal-api-key');
-  if (apiKey !== process.env.INTERNAL_API_KEY) {
+  const expectedKey = await getConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY);
+  if (!expectedKey || apiKey !== expectedKey) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

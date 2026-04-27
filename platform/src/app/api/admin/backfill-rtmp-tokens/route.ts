@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateRtmpToken, generateStreamKeyHash } from '@/lib/rtmp-tokens';
+import { requireConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 /**
  * POST /api/admin/backfill-rtmp-tokens
@@ -22,9 +23,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ data: { updated: 0, message: 'All events already have RTMP tokens' } });
   }
 
+  const signingSecret = await requireConfigValue(prisma, CONFIG_KEYS.PLAYBACK_SIGNING_SECRET);
+
   let updated = 0;
   for (const event of events) {
-    const rtmpToken = generateRtmpToken(event.id, event.title);
+    const rtmpToken = generateRtmpToken(event.id, event.title, signingSecret);
     const rtmpStreamKeyHash = generateStreamKeyHash(event.id, event.title);
 
     await prisma.event.update({

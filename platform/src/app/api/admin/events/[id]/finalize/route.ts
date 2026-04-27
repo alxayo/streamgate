@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
+import { requireConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 // POST /api/admin/events/:id/finalize — Finalize event as VOD
 export async function POST(
@@ -27,7 +28,7 @@ export async function POST(
   try {
     const response = await fetch(`${hlsBaseUrl}/admin/finalize/${id}`, {
       method: 'POST',
-      headers: { 'X-Internal-Api-Key': env.INTERNAL_API_KEY },
+      headers: { 'X-Internal-Api-Key': await requireConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY) },
       signal: AbortSignal.timeout(30000),
     });
 

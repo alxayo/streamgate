@@ -13,13 +13,15 @@
  * Uses the same upsert bootstrap guard as the per-event endpoint — never 500s.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { env } from '@/lib/env';
+import { prisma } from '@/lib/prisma';
+import { getConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 import { getSystemDefaults } from '@/lib/stream-config';
 
 export async function GET(request: NextRequest) {
   // Authenticate — reject requests without a valid internal API key
   const apiKey = request.headers.get('x-internal-api-key');
-  if (apiKey !== env.INTERNAL_API_KEY) {
+  const expectedKey = await getConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY);
+  if (!expectedKey || apiKey !== expectedKey) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

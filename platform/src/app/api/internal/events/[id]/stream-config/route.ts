@@ -8,7 +8,7 @@
  *   system defaults + per-event overrides = effective config
  *
  * Auth: X-Internal-Api-Key header (same shared secret as the revocation endpoint).
- * Uses env.INTERNAL_API_KEY (typed, throws on missing) — NOT process.env directly.
+ * Uses getConfigValue() for env→DB fallback resolution.
  *
  * Response codes:
  *   200 — config returned (transcoder should start FFmpeg)
@@ -17,7 +17,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { env } from '@/lib/env';
+import { getConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 import { getSystemDefaults, mergeStreamConfig } from '@/lib/stream-config';
 import type { TranscoderConfig, PlayerConfig } from '@streaming/shared';
 
@@ -27,7 +27,8 @@ export async function GET(
 ) {
   // Authenticate — reject requests without a valid internal API key
   const apiKey = request.headers.get('x-internal-api-key');
-  if (apiKey !== env.INTERNAL_API_KEY) {
+  const expectedKey = await getConfigValue(prisma, CONFIG_KEYS.INTERNAL_API_KEY);
+  if (!expectedKey || apiKey !== expectedKey) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

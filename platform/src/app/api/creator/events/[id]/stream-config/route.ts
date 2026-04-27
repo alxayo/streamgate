@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireCreator } from '@/lib/creator-session';
+import { getConfigValue, CONFIG_KEYS } from '@/lib/system-config';
 
 export async function GET(
   _request: NextRequest,
@@ -43,7 +44,7 @@ export async function GET(
   const rtmpHost = process.env.RTMP_SERVER_HOST
     || 'rtmp-server-du7fhxanu5cak.delightfulglacier-111baa9d.eastus2.azurecontainerapps.io';
   const rtmpPort = process.env.RTMP_SERVER_PORT || '1935';
-  const rtmpToken = event.rtmpToken || process.env.RTMP_AUTH_TOKEN || '';
+  const rtmpToken = event.rtmpToken || await getConfigValue(prisma, CONFIG_KEYS.RTMP_AUTH_TOKEN) || '';
 
   // Use the slug-based stream key hash if available, otherwise fall back to UUID format
   const streamKey = event.rtmpStreamKeyHash
