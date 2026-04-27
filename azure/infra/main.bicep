@@ -58,6 +58,10 @@ param internalApiKey string
 @secure()
 param adminPasswordHash string
 
+@description('Secret for admin session encryption and TOTP secret encryption (min 32 chars)')
+@secure()
+param adminSessionSecret string
+
 @description('Name of the existing HLS output file share (from rtmp-go deployment)')
 param hlsOutputShareName string = 'hls-output'
 
@@ -355,6 +359,10 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'admin-password-hash'
           value: adminPasswordHash
         }
+        {
+          name: 'admin-session-secret'
+          value: adminSessionSecret
+        }
         ...(!empty(rtmpAuthToken) ? [
           {
             name: 'rtmp-auth-token'
@@ -388,6 +396,10 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'ADMIN_PASSWORD_HASH'
               secretRef: 'admin-password-hash'
+            }
+            {
+              name: 'ADMIN_SESSION_SECRET'
+              secretRef: 'admin-session-secret'
             }
             {
               name: 'HLS_SERVER_BASE_URL'

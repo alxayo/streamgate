@@ -12,6 +12,7 @@
 #   PLAYBACK_SIGNING_SECRET   — HMAC secret (auto-generated if empty)
 #   INTERNAL_API_KEY          — internal API key (auto-generated if empty)
 #   ADMIN_PASSWORD_HASH       — bcrypt hash of admin password (required)
+#   ADMIN_SESSION_SECRET      — secret for session + TOTP encryption (auto-generated if empty)
 #   HLS_SERVER_BASE_URL       — override HLS server public URL (auto-detected from DNS)
 #   CORS_ALLOWED_ORIGIN       — override CORS origin (auto-detected from DNS)
 #   PLATFORM_APP_URL          — override platform app URL for HLS→Platform comms (auto-detected from DNS)
@@ -120,6 +121,13 @@ if [ -z "${ADMIN_PASSWORD_HASH:-}" ]; then
   fi
 fi
 
+# Auto-generate ADMIN_SESSION_SECRET if not set
+if [ -z "${ADMIN_SESSION_SECRET:-}" ]; then
+  ADMIN_SESSION_SECRET=$(openssl rand -base64 32)
+  echo "    Generated ADMIN_SESSION_SECRET (save this!):"
+  echo "    $ADMIN_SESSION_SECRET"
+fi
+
 echo "    Secrets configured."
 
 # --- Detect admin IP ---
@@ -148,6 +156,7 @@ DEPLOY_OUTPUT=$(az deployment group create \
     playbackSigningSecret="$PLAYBACK_SIGNING_SECRET" \
     internalApiKey="$INTERNAL_API_KEY" \
     adminPasswordHash="$ADMIN_PASSWORD_HASH" \
+    adminSessionSecret="$ADMIN_SESSION_SECRET" \
     adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
   --query 'properties.outputs' \
   --output json)
@@ -272,6 +281,7 @@ DEPLOY_OUTPUT=$(az deployment group create \
     playbackSigningSecret="$PLAYBACK_SIGNING_SECRET" \
     internalApiKey="$INTERNAL_API_KEY" \
     adminPasswordHash="$ADMIN_PASSWORD_HASH" \
+    adminSessionSecret="$ADMIN_SESSION_SECRET" \
     platformImage="${REGISTRY_LOGIN_SERVER}/streamgate-platform:latest" \
     hlsServerImage="${REGISTRY_LOGIN_SERVER}/streamgate-hls:latest" \
     hlsServerBaseUrl="$EFFECTIVE_HLS_BASE_URL" \

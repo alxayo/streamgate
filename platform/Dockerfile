@@ -16,8 +16,13 @@ COPY platform/ ./platform/
 # Generate Prisma client (DATABASE_URL required at build time for config resolution)
 RUN cd platform && DATABASE_URL=file:/tmp/build.db npx prisma generate
 
-# Build Next.js
-RUN cd platform && npm run build
+# Build Next.js (dummy secrets for page data collection — real values injected at runtime)
+RUN cd platform && \
+    PLAYBACK_SIGNING_SECRET=build-placeholder \
+    INTERNAL_API_KEY=build-placeholder \
+    ADMIN_SESSION_SECRET=build-placeholder-must-be-32-chars \
+    HLS_SERVER_BASE_URL=http://localhost:4000 \
+    npm run build
 
 # Production image
 FROM node:20-alpine AS runner

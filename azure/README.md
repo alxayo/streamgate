@@ -108,7 +108,7 @@ This means there is up to 60 seconds of data loss if the container crashes witho
 cd ../platform && npm install && npm run hash-password
 # Enter your desired admin password, copy the hash output
 
-# 2. Deploy StreamGate
+# 2. Deploy StreamGate (ADMIN_SESSION_SECRET is auto-generated if not provided)
 cd ../azure
 ADMIN_PASSWORD_HASH='$2b$12$your_hash_here' ./deploy.sh
 
@@ -118,15 +118,27 @@ HLS_SERVER_FQDN="<from deploy output>" \
 ./dns-deploy.sh
 ```
 
+## First Login After Deployment
+
+1. Navigate to `https://<platform-fqdn>/admin`
+2. Log in with username `admin` and the password you hashed
+3. Complete the 2FA setup wizard (scan QR code with authenticator app)
+4. **Save your recovery codes** — shown only once!
+
 ## Secrets
 
-The deploy script auto-generates `PLAYBACK_SIGNING_SECRET` and `INTERNAL_API_KEY` if not provided. **Save them** — they're printed during deployment and needed for redeployment.
+The deploy script auto-generates `PLAYBACK_SIGNING_SECRET`, `INTERNAL_API_KEY`, and `ADMIN_SESSION_SECRET` if not provided. **Save them** — they're printed during deployment and needed for redeployment.
 
 | Secret | Purpose | Generation |
 |--------|---------|------------|
 | `PLAYBACK_SIGNING_SECRET` | HMAC-SHA256 for JWT tokens (shared between platform and HLS server) | `openssl rand -hex 32` |
 | `INTERNAL_API_KEY` | Authenticates revocation sync between HLS → Platform | `openssl rand -base64 24` |
-| `ADMIN_PASSWORD_HASH` | Bcrypt hash of the admin password | `npm run hash-password` |
+| `ADMIN_PASSWORD_HASH` | Bcrypt hash of the initial super admin password (used for first-boot seeding) | `npm run hash-password` |
+| `ADMIN_SESSION_SECRET` | Session cookie encryption + TOTP secret encryption (AES-256-GCM) | `openssl rand -base64 32` |
+
+:::warning ADMIN_SESSION_SECRET is critical
+This secret encrypts both the admin session cookies and the TOTP secrets stored in the database. If lost or rotated, all admin users must re-enroll 2FA and all active sessions are invalidated.
+:::
 
 ## RTMP Auth Integration
 
