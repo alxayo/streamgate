@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
-import { loadConfig } from './config.js';
+import { loadConfig, type ServerConfig } from './config.js';
+import { fetchRemoteConfig } from './services/config-fetcher.js';
 import { JwtVerifier } from './services/jwt-verifier.js';
 import { RevocationCache } from './services/revocation-cache.js';
 import { RevocationSyncService } from './services/revocation-sync.js';
@@ -18,59 +19,72 @@ import { createHealthRoute } from './routes/health.js';
 import { createAdminCacheRoute } from './routes/admin-cache.js';
 import { createAdminFinalizeRoute } from './routes/admin-finalize.js';
 
-const config = loadConfig();
-const app = express();
+let app: express.Express;
+let config: ServerConfig;
 
-// Services
-const jwtVerifier = new JwtVerifier(config);
-const revocationCache = new RevocationCache();
-const syncService = new RevocationSyncService(revocationCache, config);
-const contentResolver = new ContentResolver(config);
-const upstreamProxy = config.upstreamOrigin ? new UpstreamProxy(config) : null;
-const segmentCache = new SegmentCache(config);
-const inflightDedup = new InflightDeduplicator();
-const cacheCleanup = new CacheCleanupService(config);
+async function main() {
+  // Fetch missing config from platform API before loading config
+  await fetchRemoteConfig();
 
-// Middleware
-app.use(createCorsMiddleware(config));
-app.use(createRequestLogger());
+  config = loadConfig();
+  app = express();
 
-// Routes (no auth)
-app.use(createHealthRoute(revocationCache, syncService, segmentCache));
+  // Services
+  const jwtVerifier = new JwtVerifier(config);
+  const revocationCache = new RevocationCache();
+  const syncService = new RevocationSyncService(revocationCache, config);
+  const contentResolver = new ContentResolver(config);
+  const upstreamProxy = config.upstreamOrigin ? new UpstreamProxy(config) : null;
+  const segmentCache = new SegmentCache(config);
+  const inflightDedup = new InflightDeduplicator();
+  const cacheCleanup = new CacheCleanupService(config);
 
-// Routes (API key auth)
-app.use(createAdminCacheRoute(segmentCache, upstreamProxy, config));
-app.use(createAdminFinalizeRoute(upstreamProxy, config));
+  // Middleware
+  app.use(createCorsMiddleware(config));
+  app.use(createRequestLogger());
 
-// Routes (JWT auth)
-const jwtAuth = createJwtAuthMiddleware(jwtVerifier, revocationCache);
-app.use('/streams', jwtAuth);
-app.use(createStreamRoutes(contentResolver, upstreamProxy, segmentCache, inflightDedup, config));
+  // Routes (no auth)
+  app.use(createHealthRoute(revocationCache, syncService, segmentCache));
 
-// Error handler (must be last)
-app.use(createErrorHandler());
+  // Routes (API key auth)
+  app.use(createAdminCacheRoute(segmentCache, upstreamProxy, config));
+  app.use(createAdminFinalizeRoute(upstreamProxy, config));
 
-// Start services
-syncService.start();
-cacheCleanup.start();
+  // Routes (JWT auth)
+  const jwtAuth = createJwtAuthMiddleware(jwtVerifier, revocationCache);
+  app.use('/streams', jwtAuth);
+  app.use(createStreamRoutes(contentResolver, upstreamProxy, segmentCache, inflightDedup, config));
 
-const server = app.listen(config.port, '0.0.0.0', () => {
-  console.log(`HLS Media Server listening on 0.0.0.0:${config.port}`);
-  console.log(`Content mode: ${contentResolver.mode}`);
-});
+  // Error handler (must be last)
+  app.use(createErrorHandler());
 
-// Graceful shutdown
-function shutdown() {
-  console.log('Shutting down...');
-  syncService.stop();
-  cacheCleanup.stop();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+  // Start services
+  syncService.start();
+  cacheCleanup.start();
+
+  const server = app.listen(config.port, '0.0.0.0', () => {
+    console.log(`HLS Media Server listening on 0.0.0.0:${config.port}`);
+    console.log(`Content mode: ${contentResolver.mode}`);
   });
+
+  // Graceful shutdown
+  function shutdown() {
+    console.log('Shutting down...');
+    syncService.stop();
+    cacheCleanup.stop();
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+main().catch((err) => {
+  console.error('Fatal startup error:', err);
+  process.exit(1);
+});
 
 export { app, config };

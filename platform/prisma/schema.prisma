@@ -245,3 +245,13 @@ model SystemSettings {
   creatorRegistrationMode String @default("open") // "open" | "approval" | "disabled"
   updatedAt          DateTime @updatedAt
 }
+
+/// Shared configuration key-value store.
+/// Stores secrets and settings (e.g., INTERNAL_API_KEY, PLAYBACK_SIGNING_SECRET)
+/// so all services can read them from the DB instead of relying on env var sync.
+/// Resolution order: environment variable → DB row → null (see lib/system-config.ts).
+model SystemConfig {
+  key       String   @id       // Config key (e.g., "INTERNAL_API_KEY")
+  value     String             // Config value (plaintext — encrypt sensitive values at the app layer)
+  updatedAt DateTime @updatedAt
+}
