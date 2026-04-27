@@ -25,8 +25,8 @@ These variables **must match** between the Platform App and HLS Media Server.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PLAYBACK_SIGNING_SECRET` | ✅ | — | HMAC-SHA256 secret for signing and verifying JWT playback tokens. Must be at least 32 characters. Must be **identical** on both services. |
-| `INTERNAL_API_KEY` | ✅ | — | API key used by the HLS server when polling the Platform App's `/api/revocations` endpoint. Sent as `X-Internal-Api-Key` header. Must be **identical** on both services. |
+| `PLAYBACK_SIGNING_SECRET` | ✅ | — | HMAC-SHA256 secret for signing and verifying JWT playback tokens. Must be at least 32 characters. Must be **identical** on both services. Supports [DB fallback](#database-backed-configuration). |
+| `INTERNAL_API_KEY` | ✅ | — | API key used by the HLS server when polling the Platform App's `/api/revocations` endpoint. Sent as `X-Internal-Api-Key` header. Must be **identical** on both services. Supports [DB fallback](#database-backed-configuration). |
 
 ### Generating Shared Secrets
 
@@ -56,7 +56,7 @@ Set these in `platform/.env` or the root `.env` file.
 | `NEXT_PUBLIC_APP_NAME` | ❌ | `StreamGate` | Application name displayed in the UI. The `NEXT_PUBLIC_` prefix makes it available in the browser. |
 | `SESSION_TIMEOUT_SECONDS` | ❌ | `60` | Seconds of missed heartbeats before a viewing session is considered abandoned and automatically released. Lower values free up tokens faster; higher values tolerate more network instability. See [Live Streaming Tuning Guide](./live-streaming-tuning.md#session-timeout-session_timeout_seconds) for trade-offs. |
 | `RTMP_SERVER_HOST` | ❌ | — | RTMP server hostname/URL for ingest endpoint display in admin UI (e.g., `rtmp://rtmp.example.com:1935`). When set, the event detail page shows copy-ready RTMP ingest URLs. |
-| `RTMP_AUTH_TOKEN` | ❌ | — | Shared secret for RTMP publish authentication. Appended to ingest URLs as `?token=` parameter. Also used to validate RTMP `on_publish` callbacks at `/api/rtmp/auth`. |
+| `RTMP_AUTH_TOKEN` | ❌ | — | Shared secret for RTMP publish authentication. Appended to ingest URLs as `?token=` parameter. Also used to validate RTMP `on_publish` callbacks at `/api/rtmp/auth`. Supports [DB fallback](#database-backed-configuration). |
 | `SRT_SERVER_HOST` | ❌ | — | SRT server hostname for ingest endpoint display (e.g., `srt://srt.example.com:9000`). When set, the event detail page includes an SRT ingest URL. |
 
 ### Database URL Examples
@@ -215,6 +215,53 @@ PORT=4000
 ### Docker Compose (defaults in `docker-compose.yml`)
 
 The Docker Compose file includes pre-configured values for local development. Override them by setting values in the root `.env` file or by adding a `docker-compose.override.yml`.
+
+---
+
+## Database-Backed Configuration
+
+Shared secrets (`PLAYBACK_SIGNING_SECRET`, `INTERNAL_API_KEY`, `RTMP_AUTH_TOKEN`) can be stored in the database instead of — or in addition to — environment variables. This is managed through the **SystemConfig** table.
+
+### How It Works
+
+When a service needs a shared secret, it resolves the value in this order:
+
+1. **Environment variable** — if set, always used (highest priority)
+2. **Database (SystemConfig table)** — used if the env var is not set
+3. **Error** — if neither source has a value and the secret is required
+
+This means existing deployments that use env vars exclusively continue to work with no changes.
+
+### When to Use DB Configuration
+
+| Deployment Style | Recommendation |
+|-----------------|----------------|
+| **On-premises / single server** | Env vars work well — no changes needed |
+| **Cloud / multi-instance** | DB config avoids duplicating secrets across containers and hosts |
+| **Docker Compose** | Either approach works — env vars via `.env` file or DB config |
+
+### Seeding Initial Values
+
+Use the Prisma seed script to populate the database with initial secrets:
+
+```bash
+cd platform
+npx prisma db seed
+```
+
+The seed script is **idempotent** — it won't overwrite existing DB values. If environment variables are set when you run the seed, those values are imported into the database.
+
+### Managing Secrets at Runtime
+
+Shared secrets can be viewed, edited, and regenerated from the Admin Console's **System Configuration** page at `/admin/config`. See [System Configuration](./admin-console.md#system-configuration) for details.
+
+:::warning Service restart
+The HLS Media Server caches secrets at startup. After changing a shared secret in the database, restart the HLS server for changes to take effect. The Platform App reads from the database on each request, so changes are effective immediately for that service.
+:::
+
+:::note env-only secrets
+`ADMIN_PASSWORD_HASH` and `ADMIN_SESSION_SECRET` remain **environment-variable only** — they are not stored in the SystemConfig table. These are used during application boot before the database is available.
+:::
 
 ---
 

@@ -54,8 +54,10 @@ cp hls-server/.env.example hls-server/.env
 ```bash
 cd platform
 npx prisma migrate dev
-npx prisma db seed    # Optional: populate with sample data
+npx prisma db seed    # Seeds shared secrets and optional sample data
 ```
+
+The seed script generates initial shared secrets (`PLAYBACK_SIGNING_SECRET`, `INTERNAL_API_KEY`, `RTMP_AUTH_TOKEN`) and stores them in the database. If these environment variables are already set, the seed imports their values instead. The script is idempotent — safe to run multiple times.
 
 ### 5. Prepare Test Streams
 
@@ -101,7 +103,31 @@ This starts both services co-located (Topology Option A from PDR §18.3).
 
 ### Production Deployment
 
-For production, deploy services separately:
+For production, deploy services separately.
+
+#### Database Setup
+
+Before starting services, run migrations and seed initial secrets:
+
+```bash
+cd platform
+npx prisma migrate deploy        # Apply all migrations (production-safe)
+npx prisma db seed               # Generate shared secrets in DB (idempotent)
+```
+
+:::tip
+Use `migrate deploy` (not `migrate dev`) in production — it applies pending migrations without generating new ones or resetting data.
+:::
+
+#### Image Tagging
+
+Use timestamp-based image tags instead of `:latest` to ensure predictable rollouts:
+
+```bash
+TAG="v$(date +%s)"
+docker build -f platform/Dockerfile -t streaming-platform:$TAG .
+docker build -f hls-server/Dockerfile -t streaming-hls:$TAG .
+```
 
 **Platform App** (Vercel, Docker, or any Node.js host):
 ```bash
@@ -128,6 +154,22 @@ docker run -p 4000:4000 \
   -e CORS_ALLOWED_ORIGIN="https://app.example.com" \
   streaming-hls
 ```
+
+#### Post-Deploy Verification
+
+After deploying both services, verify they are healthy:
+
+```bash
+# Platform App health
+curl -f https://app.example.com/api/health
+
+# HLS Server health
+curl -f https://hls.example.com/health
+```
+
+Both endpoints should return HTTP 200. If the HLS server cannot reach the Platform App (e.g., wrong `PLATFORM_APP_URL`), its health check will report degraded status.
+
+> **Note**: The HLS server fetches shared secrets from the Platform App's config API at startup if they are not set as environment variables. Ensure the Platform App is running and reachable before starting the HLS server.
 
 > **Important**: `CORS_ALLOWED_ORIGIN` and `PLATFORM_APP_URL` must match the **public URL** that viewers use to access the platform — not an internal FQDN. If you use a custom domain (e.g., `watch.example.com`), set `CORS_ALLOWED_ORIGIN=https://watch.example.com` and `PLATFORM_APP_URL=https://watch.example.com`. Similarly, `HLS_SERVER_BASE_URL` in the platform must point to the HLS server's **public URL** (e.g., `https://hls.example.com`).
 

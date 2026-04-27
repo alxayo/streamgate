@@ -311,3 +311,44 @@ Abandoned sessions are automatically cleaned up after the configured timeout (de
 - Review session statistics
 - Revoke any unused tokens if not needed for VOD rewatch
 - Archive the event when the access window closes
+
+---
+
+## System Configuration
+
+The **System Configuration** page (`/admin/config`) lets Super Admins and Admins manage shared secrets used by StreamGate's services. Navigate to **Config** in the sidebar to access it.
+
+### What It Shows
+
+The page displays all shared configuration keys in a table:
+
+| Column | Description |
+|--------|-------------|
+| **Key** | The configuration key name (e.g., `PLAYBACK_SIGNING_SECRET`) |
+| **Value** | The current value, masked for security (click to reveal temporarily) |
+| **Source** | Where the value comes from — **ENV** (environment variable) or **DB** (database) |
+| **Last Updated** | When the value was last changed (DB values only) |
+
+### Editing a Value
+
+1. Click the **Edit** (pencil) icon next to the key you want to change
+2. Enter the new value
+3. Click **Save**
+
+If the key is currently sourced from an environment variable, the ENV value always takes priority. To use DB-managed values, remove the corresponding environment variable and restart the service.
+
+### Regenerating a Secret
+
+For secrets that don't need to match an external system (like `PLAYBACK_SIGNING_SECRET` or `INTERNAL_API_KEY`):
+
+1. Click the **Regenerate** button next to the key
+2. Confirm the action in the dialog — this generates a new cryptographically secure random value
+3. Restart the HLS Media Server to pick up the new value
+
+:::danger Regenerating shared secrets
+Regenerating `PLAYBACK_SIGNING_SECRET` invalidates **all** active viewer sessions immediately — every connected viewer will need to re-enter their access code. Only regenerate this secret during planned maintenance windows.
+:::
+
+:::warning Restart required
+After changing any shared secret, restart the HLS Media Server for the change to take effect. The Platform App picks up DB changes immediately, but the HLS server caches secrets at startup.
+:::

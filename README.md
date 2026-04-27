@@ -87,6 +87,8 @@ cd hls-server && set -a && source ../.env && set +a && npm run dev    # Terminal
 
 See `.env.example` for a complete reference with documentation.
 
+Shared secrets (`PLAYBACK_SIGNING_SECRET`, `INTERNAL_API_KEY`, `RTMP_AUTH_TOKEN`) can also be stored in the database and managed through the Admin Console at `/admin/config`. Environment variables take priority when set. See the [Configuration Reference](docs/docs/user-guide/configuration.md) for details.
+
 ## Development Workflow
 
 - Both services share the `@streaming/shared` workspace package
