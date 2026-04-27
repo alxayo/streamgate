@@ -1,28 +1,23 @@
 // =========================================================================
-// Admin Route Protection Middleware
+// Route Protection Middleware
 // =========================================================================
-// This Next.js middleware runs before every request to /admin/* and /api/admin/*.
-// It enforces three layers of protection:
+// This Next.js middleware runs before every request to protected routes.
+// It enforces authentication for both admin and creator route trees:
 //
-// 1. IP Restriction (optional): If ADMIN_ALLOWED_IP is set, only requests
-//    from that IP address can access admin routes.
+// Admin Routes (/admin/*, /api/admin/*):
+//   1. IP Restriction (optional): If ADMIN_ALLOWED_IP is set, only that IP.
+//   2. Authentication: Reads admin_session cookie.
+//   3. 2FA Enforcement: Redirects to /admin/setup-2fa if needed.
 //
-// 2. Authentication: Reads the iron-session cookie and checks if the user
-//    is logged in (either via the new multi-user system or legacy mode).
-//    Unauthenticated requests are redirected to /admin/login (pages) or
-//    get a 401 JSON response (API routes).
-//
-// 3. 2FA Enforcement: For multi-user sessions where twoFactorVerified is
-//    false, redirects to /admin/setup-2fa (unless already on a 2FA setup path).
-//    This ensures new users complete 2FA setup before accessing the admin console.
-//
-// Some paths are public (login, session check, 2FA verification endpoints)
-// to allow the authentication flow to complete.
+// Creator Routes (/creator/*, /api/creator/*):
+//   1. Authentication: Reads creator_session cookie.
+//   2. Active check: Verifies creator and channel are not suspended.
 // =========================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getIronSession } from 'iron-session';
 import type { SessionData } from '@/lib/admin-session';
+import type { CreatorSessionData } from '@/lib/creator-session';
 
 /**
  * Extract the client's real IP address from proxy headers.
@@ -37,9 +32,8 @@ function getClientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? 'unknown';
 }
 
-/** Routes that don't require authentication — these are needed for the
- *  login flow itself (login page, login API, session check, 2FA verify) */
-const PUBLIC_PATHS = [
+/** Admin routes that don't require authentication */
+const ADMIN_PUBLIC_PATHS = [
   '/admin/login',
   '/api/admin/login',
   '/api/admin/session',
@@ -48,28 +42,43 @@ const PUBLIC_PATHS = [
   '/api/admin/emergency-login',
 ];
 
-/** Routes allowed when authenticated but 2FA setup is still pending.
- *  The user needs access to these to complete 2FA setup and to log out. */
-const SETUP_2FA_PATHS = [
+/** Admin routes allowed when 2FA setup is pending */
+const ADMIN_SETUP_2FA_PATHS = [
   '/admin/setup-2fa',
   '/api/admin/2fa/setup',
   '/api/admin/2fa/confirm',
   '/api/admin/logout',
 ];
 
-function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'));
+/** Creator routes that don't require authentication */
+const CREATOR_PUBLIC_PATHS = [
+  '/creator/login',
+  '/creator/register',
+  '/api/creator/login',
+  '/api/creator/register',
+  '/api/creator/session',
+];
+
+function isAdminPublicPath(pathname: string): boolean {
+  return ADMIN_PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'));
 }
 
-function isSetup2FAPath(pathname: string): boolean {
-  return SETUP_2FA_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'));
+function isAdminSetup2FAPath(pathname: string): boolean {
+  return ADMIN_SETUP_2FA_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'));
+}
+
+function isCreatorPublicPath(pathname: string): boolean {
+  return CREATOR_PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'));
 }
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // IP-based admin access restriction (if ADMIN_ALLOWED_IP is set)
+  // =========================================================================
+  // ADMIN ROUTE PROTECTION
+  // =========================================================================
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    // IP-based admin access restriction
     const allowedIp = process.env.ADMIN_ALLOWED_IP;
     if (allowedIp) {
       const clientIp = getClientIp(request);
@@ -80,15 +89,12 @@ export async function middleware(request: NextRequest) {
         return new NextResponse('Forbidden', { status: 403 });
       }
     }
-  }
 
-  // Skip public endpoints (login, 2FA verify, emergency login)
-  if (isPublicPath(pathname)) {
-    return NextResponse.next();
-  }
+    // Skip public endpoints
+    if (isAdminPublicPath(pathname)) {
+      return NextResponse.next();
+    }
 
-  // Protect admin pages and API routes
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     const response = NextResponse.next();
     const session = await getIronSession<SessionData>(request, response, {
       password: process.env.ADMIN_SESSION_SECRET!,
@@ -110,7 +116,7 @@ export async function middleware(request: NextRequest) {
     // For non-legacy sessions: enforce 2FA setup
     if (!session.isLegacy && session.userId && session.role) {
       const needs2FASetup = !session.twoFactorVerified;
-      if (needs2FASetup && !isSetup2FAPath(pathname)) {
+      if (needs2FASetup && !isAdminSetup2FAPath(pathname)) {
         if (pathname.startsWith('/api/admin')) {
           return NextResponse.json(
             { error: '2FA setup required', redirect: '/admin/setup-2fa' },
@@ -122,10 +128,34 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // =========================================================================
+  // CREATOR ROUTE PROTECTION
+  // =========================================================================
+  if (pathname.startsWith('/creator') || pathname.startsWith('/api/creator')) {
+    // Skip public endpoints (login, register)
+    if (isCreatorPublicPath(pathname)) {
+      return NextResponse.next();
+    }
+
+    const response = NextResponse.next();
+    const session = await getIronSession<CreatorSessionData>(request, response, {
+      password: process.env.ADMIN_SESSION_SECRET!,
+      cookieName: 'creator_session',
+    });
+
+    // Check authentication
+    if (!session.creatorId || !session.channelId) {
+      if (pathname.startsWith('/api/creator')) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      return NextResponse.redirect(new URL('/creator/login', request.url));
+    }
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/admin/:path*'],
+  matcher: ['/admin/:path*', '/api/admin/:path*', '/creator/:path*', '/api/creator/:path*'],
 };
 
