@@ -21,8 +21,12 @@ import {
   type PlayerConfig,
   type RenderProfileName,
   type CodecName,
+  type VODRendition,
   DEFAULT_TRANSCODER_CONFIG,
   DEFAULT_PLAYER_CONFIG,
+  DEFAULT_VOD_RENDITIONS,
+  DEFAULT_MAX_UPLOAD_SIZE_BYTES,
+  ALL_CODEC_NAMES,
   RENDER_PROFILES,
 } from '@streaming/shared';
 import { prisma } from '@/lib/prisma';
@@ -53,10 +57,18 @@ export const HARDCODED_PLAYER_DEFAULTS: PlayerConfig = DEFAULT_PLAYER_CONFIG;
  *
  * This means this function NEVER throws due to a missing row, even if
  * `npx prisma db seed` was not run after a migration.
+ *
+ * Returns transcoder/player config plus the three VOD-related settings:
+ * - maxUploadSizeBytes — maximum file size for video uploads (BigInt)
+ * - enabledCodecs — which codecs are enabled for VOD transcoding
+ * - vodRenditions — per-codec rendition ladders (quality levels)
  */
 export async function getSystemDefaults(): Promise<{
   transcoder: TranscoderConfig;
   player: PlayerConfig;
+  maxUploadSizeBytes: bigint;
+  enabledCodecs: string[];
+  vodRenditions: Record<string, VODRendition[]>;
 }> {
   const settings = await prisma.systemSettings.upsert({
     where: { id: 'default' },
@@ -64,6 +76,10 @@ export async function getSystemDefaults(): Promise<{
       id: 'default',
       transcoderDefaults: JSON.stringify(HARDCODED_TRANSCODER_DEFAULTS),
       playerDefaults: JSON.stringify(HARDCODED_PLAYER_DEFAULTS),
+      // VOD defaults — bootstrapped from the shared constants
+      maxUploadSizeBytes: DEFAULT_MAX_UPLOAD_SIZE_BYTES,
+      enabledCodecs: JSON.stringify(['h264']),
+      vodRenditions: JSON.stringify(DEFAULT_VOD_RENDITIONS),
     },
     update: {}, // No-op — don't overwrite existing settings
   });
@@ -71,6 +87,9 @@ export async function getSystemDefaults(): Promise<{
   return {
     transcoder: JSON.parse(settings.transcoderDefaults) as TranscoderConfig,
     player: JSON.parse(settings.playerDefaults) as PlayerConfig,
+    maxUploadSizeBytes: settings.maxUploadSizeBytes,
+    enabledCodecs: JSON.parse(settings.enabledCodecs) as string[],
+    vodRenditions: JSON.parse(settings.vodRenditions) as Record<string, VODRendition[]>,
   };
 }
 

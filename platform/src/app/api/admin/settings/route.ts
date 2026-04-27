@@ -19,6 +19,12 @@ import {
 } from '@/lib/stream-config';
 import { checkPermission } from '@/lib/require-permission';
 import { getRegistrationMode, type RegistrationMode } from '@/lib/registration-mode';
+import {
+  ALL_CODEC_NAMES,
+  MIN_ALLOWED_UPLOAD_SIZE_BYTES,
+  MAX_ALLOWED_UPLOAD_SIZE_BYTES,
+} from '@streaming/shared';
+import type { VODRendition } from '@streaming/shared';
 
 /**
  * GET /api/admin/settings
@@ -37,6 +43,10 @@ export async function GET() {
       transcoder: defaults.transcoder,
       player: defaults.player,
       creatorRegistrationMode: registrationMode,
+      // VOD settings — BigInt must be serialized as string for JSON
+      maxUploadSizeBytes: defaults.maxUploadSizeBytes.toString(),
+      enabledCodecs: defaults.enabledCodecs,
+      vodRenditions: defaults.vodRenditions,
     },
   });
 }
@@ -54,7 +64,7 @@ export async function PUT(request: NextRequest) {
   if (denied) return denied;
 
   const body = await request.json();
-  const { transcoder, player, creatorRegistrationMode } = body;
+  const { transcoder, player, creatorRegistrationMode, maxUploadSizeBytes, enabledCodecs, vodRenditions } = body;
 
   // Validate transcoder config if provided
   if (transcoder !== undefined) {
@@ -87,6 +97,94 @@ export async function PUT(request: NextRequest) {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Validate VOD settings if provided
+  // ---------------------------------------------------------------------------
+
+  // maxUploadSizeBytes: must be a numeric string within the allowed range (100MB–50GB)
+  if (maxUploadSizeBytes !== undefined) {
+    const parsed = BigInt(maxUploadSizeBytes);
+    if (parsed < MIN_ALLOWED_UPLOAD_SIZE_BYTES || parsed > MAX_ALLOWED_UPLOAD_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: `maxUploadSizeBytes must be between ${MIN_ALLOWED_UPLOAD_SIZE_BYTES} and ${MAX_ALLOWED_UPLOAD_SIZE_BYTES}` },
+        { status: 400 },
+      );
+    }
+  }
+
+  // enabledCodecs: must be a non-empty array of recognized codec names
+  if (enabledCodecs !== undefined) {
+    if (!Array.isArray(enabledCodecs) || enabledCodecs.length === 0) {
+      return NextResponse.json(
+        { error: 'enabledCodecs must be a non-empty array' },
+        { status: 400 },
+      );
+    }
+    for (const codec of enabledCodecs) {
+      if (!ALL_CODEC_NAMES.includes(codec)) {
+        return NextResponse.json(
+          { error: `Invalid codec name: ${codec}` },
+          { status: 400 },
+        );
+      }
+    }
+  }
+
+  // vodRenditions: must be an object with valid codec keys and rendition arrays
+  if (vodRenditions !== undefined) {
+    if (!vodRenditions || typeof vodRenditions !== 'object' || Array.isArray(vodRenditions)) {
+      return NextResponse.json(
+        { error: 'vodRenditions must be an object' },
+        { status: 400 },
+      );
+    }
+    // Bitrate pattern: one or more digits followed by 'k' (e.g., '5000k', '128k')
+    const bitratePattern = /^\d+k$/;
+    for (const [codecKey, renditions] of Object.entries(vodRenditions)) {
+      // Each key must be a recognized codec name
+      if (!ALL_CODEC_NAMES.includes(codecKey as typeof ALL_CODEC_NAMES[number])) {
+        return NextResponse.json(
+          { error: `Invalid codec key in vodRenditions: ${codecKey}` },
+          { status: 400 },
+        );
+      }
+      // Each value must be a non-empty array of rendition objects
+      if (!Array.isArray(renditions) || renditions.length === 0) {
+        return NextResponse.json(
+          { error: `vodRenditions.${codecKey} must be a non-empty array of renditions` },
+          { status: 400 },
+        );
+      }
+      // Validate each rendition object has the required fields with correct types
+      for (const r of renditions as VODRendition[]) {
+        if (!r.label || typeof r.label !== 'string') {
+          return NextResponse.json(
+            { error: `Each rendition in ${codecKey} must have a string 'label'` },
+            { status: 400 },
+          );
+        }
+        if (!Number.isInteger(r.width) || r.width <= 0 || !Number.isInteger(r.height) || r.height <= 0) {
+          return NextResponse.json(
+            { error: `Rendition "${r.label}" in ${codecKey}: width and height must be positive integers` },
+            { status: 400 },
+          );
+        }
+        if (typeof r.videoBitrate !== 'string' || !bitratePattern.test(r.videoBitrate)) {
+          return NextResponse.json(
+            { error: `Rendition "${r.label}" in ${codecKey}: videoBitrate must match pattern like '5000k'` },
+            { status: 400 },
+          );
+        }
+        if (typeof r.audioBitrate !== 'string' || !bitratePattern.test(r.audioBitrate)) {
+          return NextResponse.json(
+            { error: `Rendition "${r.label}" in ${codecKey}: audioBitrate must match pattern like '128k'` },
+            { status: 400 },
+          );
+        }
+      }
+    }
+  }
+
   // Get current values so we can merge partial updates
   const current = await getSystemDefaults();
 
@@ -101,11 +199,17 @@ export async function PUT(request: NextRequest) {
       transcoderDefaults: JSON.stringify(updatedTranscoder),
       playerDefaults: JSON.stringify(updatedPlayer),
       ...(creatorRegistrationMode && { creatorRegistrationMode }),
+      ...(maxUploadSizeBytes !== undefined && { maxUploadSizeBytes: BigInt(maxUploadSizeBytes) }),
+      ...(enabledCodecs !== undefined && { enabledCodecs: JSON.stringify(enabledCodecs) }),
+      ...(vodRenditions !== undefined && { vodRenditions: JSON.stringify(vodRenditions) }),
     },
     update: {
       transcoderDefaults: JSON.stringify(updatedTranscoder),
       playerDefaults: JSON.stringify(updatedPlayer),
       ...(creatorRegistrationMode && { creatorRegistrationMode }),
+      ...(maxUploadSizeBytes !== undefined && { maxUploadSizeBytes: BigInt(maxUploadSizeBytes) }),
+      ...(enabledCodecs !== undefined && { enabledCodecs: JSON.stringify(enabledCodecs) }),
+      ...(vodRenditions !== undefined && { vodRenditions: JSON.stringify(vodRenditions) }),
     },
   });
 
@@ -114,6 +218,10 @@ export async function PUT(request: NextRequest) {
       transcoder: JSON.parse(settings.transcoderDefaults),
       player: JSON.parse(settings.playerDefaults),
       creatorRegistrationMode: settings.creatorRegistrationMode,
+      // VOD settings — BigInt serialized as string for JSON compatibility
+      maxUploadSizeBytes: settings.maxUploadSizeBytes.toString(),
+      enabledCodecs: JSON.parse(settings.enabledCodecs),
+      vodRenditions: JSON.parse(settings.vodRenditions),
     },
   });
 }
