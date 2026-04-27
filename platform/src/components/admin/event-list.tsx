@@ -23,6 +23,8 @@ interface Event {
   isActive: boolean;
   isArchived: boolean;
   activeViewers: number;
+  rtmpToken?: string | null;
+  rtmpStreamKeyHash?: string | null;
   _count: { tokens: number };
 }
 

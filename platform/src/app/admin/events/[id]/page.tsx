@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EventStatusBadge } from '@/components/admin/event-status-badge';
 import { TokenStatusBadge } from '@/components/admin/token-status-badge';
+import { RtmpTokenDisplay } from '@/components/admin/rtmp-token-display';
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,8 @@ interface EventDetail {
   isArchived: boolean;
   autoPurge: boolean;
   activeViewers: number;
+  rtmpToken?: string | null;
+  rtmpStreamKeyHash?: string | null;
   _count: { tokens: number };
   tokenBreakdown: { unused: number; redeemed: number; expired: number; revoked: number };
 }
@@ -400,6 +403,24 @@ export default function EventDetailPage() {
           {!streamConfig.ingest.srt && (
             <p className="text-xs text-gray-400 pt-1">SRT not configured. Set SRT_SERVER_HOST env var to enable.</p>
           )}
+        </div>
+      )}
+
+      {/* ================================================================
+          RTMP AUTHENTICATION — Per-event tokens for RTMP publishing
+          Shows stream key hash and authentication token with copy buttons
+          ================================================================ */}
+      {event && event.streamType === 'LIVE' && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <Radio className="h-4 w-4 text-gray-500" />
+            <h3 className="font-medium text-gray-900">RTMP Authentication (Per-Event)</h3>
+          </div>
+          <RtmpTokenDisplay
+            eventId={event.id}
+            rtmpToken={event.rtmpToken}
+            rtmpStreamKeyHash={event.rtmpStreamKeyHash}
+          />
         </div>
       )}
 
