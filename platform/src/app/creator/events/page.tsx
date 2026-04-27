@@ -20,6 +20,7 @@ interface EventItem {
   startsAt: string;
   endsAt: string;
   isActive: boolean;
+  rtmpStreamKeyHash?: string | null;
   _count: { tokens: number };
 }
 
@@ -29,11 +30,14 @@ export default function CreatorEventsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const copyStreamKey = (e: React.MouseEvent, eventId: string) => {
+  const copyStreamKey = (e: React.MouseEvent, event: EventItem) => {
     e.preventDefault();
     e.stopPropagation();
-    navigator.clipboard.writeText(`live/${eventId}`);
-    setCopiedId(eventId);
+    const key = event.rtmpStreamKeyHash
+      ? `live/${event.rtmpStreamKeyHash}`
+      : `live/${event.id}`;
+    navigator.clipboard.writeText(key);
+    setCopiedId(event.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -90,9 +94,13 @@ export default function CreatorEventsPage() {
                 {event.streamType === 'LIVE' && (
                   <div className="flex items-center gap-1 mt-1">
                     <span className="text-xs text-gray-400">Key:</span>
-                    <code className="text-xs font-mono text-gray-600 bg-gray-50 px-1.5 py-0.5 rounded">live/{event.id}</code>
+                    <code className="text-xs font-mono text-gray-600 bg-gray-50 px-1.5 py-0.5 rounded">
+                      {event.rtmpStreamKeyHash
+                        ? `live/${event.rtmpStreamKeyHash}`
+                        : `live/${event.id}`}
+                    </code>
                     <button
-                      onClick={(e) => copyStreamKey(e, event.id)}
+                      onClick={(e) => copyStreamKey(e, event)}
                       className="p-0.5 text-gray-400 hover:text-gray-700"
                       title="Copy stream key"
                     >

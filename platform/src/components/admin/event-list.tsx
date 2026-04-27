@@ -35,9 +35,12 @@ export function EventList() {
   const [actionMenu, setActionMenu] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const copyStreamKey = (eventId: string) => {
-    navigator.clipboard.writeText(`live/${eventId}`);
-    setCopiedId(eventId);
+  const copyStreamKey = (event: Event) => {
+    const key = event.rtmpStreamKeyHash
+      ? `live/${event.rtmpStreamKeyHash}`
+      : `live/${event.id}`;
+    navigator.clipboard.writeText(key);
+    setCopiedId(event.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -136,9 +139,13 @@ export function EventList() {
                   <td className="px-4 py-3">
                     {event.streamType === 'LIVE' ? (
                       <div className="flex items-center gap-1">
-                        <code className="text-xs font-mono text-gray-600 bg-gray-50 px-1.5 py-0.5 rounded">live/{event.id.slice(0, 8)}…</code>
+                        <code className="text-xs font-mono text-gray-600 bg-gray-50 px-1.5 py-0.5 rounded">
+                          {event.rtmpStreamKeyHash
+                            ? `live/${event.rtmpStreamKeyHash.length > 20 ? event.rtmpStreamKeyHash.slice(0, 20) + '…' : event.rtmpStreamKeyHash}`
+                            : `live/${event.id.slice(0, 8)}…`}
+                        </code>
                         <button
-                          onClick={() => copyStreamKey(event.id)}
+                          onClick={() => copyStreamKey(event)}
                           className="p-0.5 text-gray-400 hover:text-gray-700"
                           title="Copy full stream key"
                         >

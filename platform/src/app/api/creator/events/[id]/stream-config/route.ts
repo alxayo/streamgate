@@ -24,7 +24,14 @@ export async function GET(
 
   const event = await prisma.event.findFirst({
     where: { id, channelId: session.channelId },
-    select: { id: true, title: true, streamType: true, isActive: true },
+    select: {
+      id: true,
+      title: true,
+      streamType: true,
+      isActive: true,
+      rtmpToken: true,
+      rtmpStreamKeyHash: true,
+    },
   });
 
   if (!event) {
@@ -32,12 +39,16 @@ export async function GET(
   }
 
   // --- Ingest endpoints ---
+  // Use per-event RTMP token and stream key hash if available, otherwise fall back to env var
   const rtmpHost = process.env.RTMP_SERVER_HOST
     || 'rtmp-server-du7fhxanu5cak.delightfulglacier-111baa9d.eastus2.azurecontainerapps.io';
   const rtmpPort = process.env.RTMP_SERVER_PORT || '1935';
-  const rtmpToken = process.env.RTMP_AUTH_TOKEN || '';
+  const rtmpToken = event.rtmpToken || process.env.RTMP_AUTH_TOKEN || '';
 
-  const streamKey = `live/${event.id}`;
+  // Use the slug-based stream key hash if available, otherwise fall back to UUID format
+  const streamKey = event.rtmpStreamKeyHash
+    ? `live/${event.rtmpStreamKeyHash}`
+    : `live/${event.id}`;
   const rtmpUrl = `rtmp://${rtmpHost}:${rtmpPort}/${streamKey}${rtmpToken ? `?token=${rtmpToken}` : ''}`;
 
   // SRT ingest (if configured)

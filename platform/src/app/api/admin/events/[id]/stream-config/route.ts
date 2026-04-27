@@ -30,6 +30,8 @@ export async function GET(
       isActive: true,
       transcoderConfig: true,
       playerConfig: true,
+      rtmpToken: true,
+      rtmpStreamKeyHash: true,
     },
   });
 
@@ -53,15 +55,16 @@ export async function GET(
   const merged = mergeStreamConfig(systemDefaults, hasOverrides ? eventOverrides : null);
 
   // --- Ingest endpoints ---
-  // The RTMP ingest URL uses the event ID as the stream key: live/{eventId}
-  // The auth token is passed as a query parameter: ?token=XXX
+  // Use per-event RTMP token and stream key hash if available, otherwise fall back to env var
   const rtmpHost = process.env.RTMP_SERVER_HOST
     || 'rtmp-server-du7fhxanu5cak.delightfulglacier-111baa9d.eastus2.azurecontainerapps.io';
   const rtmpPort = process.env.RTMP_SERVER_PORT || '1935';
-  const rtmpToken = process.env.RTMP_AUTH_TOKEN || '';
+  const rtmpToken = event.rtmpToken || process.env.RTMP_AUTH_TOKEN || '';
 
-  // Build the full RTMP ingest URL that OBS/FFmpeg would use
-  const streamKey = `live/${event.id}`;
+  // Use the slug-based stream key hash if available, otherwise fall back to UUID format
+  const streamKey = event.rtmpStreamKeyHash
+    ? `live/${event.rtmpStreamKeyHash}`
+    : `live/${event.id}`;
   const rtmpUrl = `rtmp://${rtmpHost}:${rtmpPort}/${streamKey}${rtmpToken ? `?token=${rtmpToken}` : ''}`;
 
   // SRT ingest (if configured — currently not deployed but show the format)

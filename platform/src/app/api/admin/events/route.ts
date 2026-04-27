@@ -1,9 +1,11 @@
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isValidAccessWindow, isValidEventSchedule } from '@streaming/shared';
 import { env } from '@/lib/env';
 import { validateTranscoderConfig, validatePlayerConfig } from '@/lib/stream-config';
 import { checkPermission } from '@/lib/require-permission';
+import { generateRtmpToken, generateStreamKeyHash } from '@/lib/rtmp-tokens';
 
 // GET /api/admin/events — List all events with filters
 export async function GET(request: NextRequest) {
@@ -138,8 +140,14 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Generate event ID first, then derive RTMP tokens from it
+  const eventId = crypto.randomUUID();
+  const rtmpToken = generateRtmpToken(eventId, title);
+  const rtmpStreamKeyHash = generateStreamKeyHash(eventId, title);
+
   const event = await prisma.event.create({
     data: {
+      id: eventId,
       title: title.trim(),
       description: description || null,
       streamType: validStreamType,
@@ -152,6 +160,10 @@ export async function POST(request: NextRequest) {
       // Stream config: store as JSON string if provided, null means use system defaults
       transcoderConfig: transcoderConfig ? JSON.stringify(transcoderConfig) : null,
       playerConfig: playerConfig ? JSON.stringify(playerConfig) : null,
+      // Per-event RTMP authentication
+      rtmpToken,
+      rtmpStreamKeyHash,
+      rtmpTokenExpiresAt: endDate,
     },
   });
 
