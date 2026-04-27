@@ -96,12 +96,14 @@ export async function POST(request: NextRequest) {
 
   const validStreamType = streamType === 'VOD' ? 'VOD' : 'LIVE';
 
-  // Generate RTMP tokens and stream key hash
-  const rtmpToken = generateRtmpToken(crypto.randomUUID(), title);
-  const rtmpStreamKeyHash = generateStreamKeyHash(crypto.randomUUID(), title);
+  // Generate event ID first, then derive RTMP tokens from it
+  const eventId = crypto.randomUUID();
+  const rtmpToken = generateRtmpToken(eventId, title);
+  const rtmpStreamKeyHash = generateStreamKeyHash(eventId, title);
 
   const event = await prisma.event.create({
     data: {
+      id: eventId,
       title: title.trim(),
       description: description || null,
       streamType: validStreamType,
