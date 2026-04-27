@@ -33,16 +33,29 @@ export async function GET(
 
   const { id } = await params;
 
-  // Fetch only the fields we need (not the full event with tokens etc.)
-  const event = await prisma.event.findUnique({
+  // Fetch by UUID first, then fall back to rtmpStreamKeyHash lookup.
+  // The HLS transcoder extracts the last path segment from the RTMP stream key
+  // (e.g., "creatortwo-4979c4514ce1" from "live/creatortwo-4979c4514ce1"),
+  // which is the rtmpStreamKeyHash, not the UUID.
+  const selectFields = {
+    id: true,
+    isActive: true,
+    transcoderConfig: true,
+    playerConfig: true,
+    rtmpToken: true,
+  };
+
+  let event = await prisma.event.findUnique({
     where: { id },
-    select: {
-      id: true,
-      isActive: true,
-      transcoderConfig: true,
-      playerConfig: true,
-    },
+    select: selectFields,
   });
+
+  if (!event) {
+    event = await prisma.event.findUnique({
+      where: { rtmpStreamKeyHash: id },
+      select: selectFields,
+    });
+  }
 
   // If event doesn't exist or is deactivated, return 404.
   // The transcoder's failure policy (§0.2) says: 404 → do not start FFmpeg.
@@ -70,11 +83,9 @@ export async function GET(
   return NextResponse.json({
     eventId: event.id,
     eventActive: true,
-    // configSource tells the transcoder logs where this config came from.
-    // Note: the transcoder has 4 log-level sources (event, event-cache, system-default, hardcoded)
-    // but this API only reports 2 (event vs system-default). See plan §1.3 for details.
     configSource: hasOverrides ? 'event' : 'system-default',
     transcoder: merged.transcoder,
     player: merged.player,
+    rtmpToken: event.rtmpToken ?? undefined,
   });
 }
