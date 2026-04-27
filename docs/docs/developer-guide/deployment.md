@@ -225,6 +225,47 @@ npx prisma migrate deploy
 SQLite and PostgreSQL have subtle differences (e.g., case sensitivity, date handling). Test thoroughly after switching providers. The Prisma schema as-is is compatible with both providers.
 :::
 
+## Database Seeding
+
+After running migrations, seed the database to generate initial shared secrets (`INTERNAL_API_KEY`, `PLAYBACK_SIGNING_SECRET`, `RTMP_AUTH_TOKEN`) in the `SystemConfig` table:
+
+```bash
+cd platform
+npx prisma db seed
+```
+
+The seed script is idempotent — it skips keys that already exist. If environment variables are set for any key, those values are imported into the database; otherwise, cryptographically random values are generated.
+
+:::tip
+On first deploy, run `npx prisma migrate deploy && npx prisma db seed` to initialize both the schema and shared secrets in one step.
+:::
+
+## Production Deployment
+
+### Image Tagging
+
+Deploy scripts use timestamp-based image tags (`v$(date +%s)`) instead of `:latest` to ensure deterministic rollouts and easy rollback:
+
+```bash
+IMAGE_TAG="v$(date +%s)"
+docker build -t myregistry/streamgate-platform:$IMAGE_TAG .
+docker push myregistry/streamgate-platform:$IMAGE_TAG
+```
+
+### Post-Deploy Verification
+
+Deploy scripts include a `verify_deployment()` function that polls container health after deployment:
+
+1. Waits for the container to reach a running state
+2. Hits the `/health` endpoint to confirm the service is responsive
+3. Fails the deploy if the health check doesn't pass within the timeout
+
+```bash
+# Example: verify a container is healthy
+curl -sf http://localhost:3000/api/health || echo "Platform unhealthy"
+curl -sf http://localhost:4000/health || echo "HLS server unhealthy"
+```
+
 ## Scaling Considerations
 
 :::tip Cloud Deployment
@@ -265,8 +306,11 @@ These must match between Platform App and HLS Server:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PLAYBACK_SIGNING_SECRET` | Yes | HMAC-SHA256 secret for JWT signing/verification. Minimum 32 characters. **Must be identical on both services.** |
-| `INTERNAL_API_KEY` | Yes | API key for revocation sync endpoint. **Must be identical on both services.** |
+| `PLAYBACK_SIGNING_SECRET` | Yes* | HMAC-SHA256 secret for JWT signing/verification. Minimum 32 characters. **Must be identical on both services.** |
+| `INTERNAL_API_KEY` | Yes* | API key for revocation sync and internal config endpoints. **Must be identical on both services.** |
+| `RTMP_AUTH_TOKEN` | Yes* | Shared secret for RTMP callback authentication. |
+
+\* These secrets can be stored in the `SystemConfig` database table instead of environment variables. Services resolve them using the config resolution pattern (env var → DB → error). The HLS server and RTMP server fetch missing secrets from the Platform App's `GET /api/internal/config` endpoint at startup.
 
 ### Platform App Variables
 
@@ -294,6 +338,10 @@ These must match between Platform App and HLS Server:
 | `REVOCATION_POLL_INTERVAL_MS` | No | `30000` | Revocation polling interval in milliseconds |
 
 ## Generating Secrets
+
+Shared secrets can be managed in two ways:
+1. **Database (recommended)** — Run `npx prisma db seed` to auto-generate, or use the Admin Config page (`/admin/config`) to view, edit, and regenerate secrets
+2. **Environment variables** — Set manually per service (env vars always take precedence over DB values)
 
 ### Signing Secret (PLAYBACK_SIGNING_SECRET)
 

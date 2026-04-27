@@ -1099,6 +1099,47 @@ The `configSource` field is `"event"` when the event has per-event overrides, or
 
 ---
 
+### GET /api/internal/config
+
+Fetches shared config values for internal services (HLS server, RTMP server). Used at startup to resolve secrets like `PLAYBACK_SIGNING_SECRET` and `RTMP_AUTH_TOKEN` without requiring them as environment variables on every service.
+
+**Request:**
+
+```bash
+curl "http://localhost:3000/api/internal/config?keys=PLAYBACK_SIGNING_SECRET,RTMP_AUTH_TOKEN" \
+  -H "X-Internal-Api-Key: your-internal-api-key"
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `keys` | Comma-separated string | Yes | Config keys to fetch. Allowed: `PLAYBACK_SIGNING_SECRET`, `RTMP_AUTH_TOKEN`, `INTERNAL_API_KEY` |
+
+**Success Response (200):**
+
+```json
+{
+  "data": {
+    "PLAYBACK_SIGNING_SECRET": "base64url-encoded-secret",
+    "RTMP_AUTH_TOKEN": "base64url-encoded-token"
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `400` | Missing `keys` parameter or unknown key names | `{ "error": "keys parameter is required" }` |
+| `401` | Missing or invalid `X-Internal-Api-Key` | `{ "error": "Unauthorized" }` |
+
+:::info Config Resolution
+Values are resolved using the config resolution pattern: environment variable → database → null. If a key is set as an env var on the Platform App, that value is returned (env vars always win). Otherwise the value stored in the `SystemConfig` database table is returned.
+:::
+
+---
+
 ### GET /api/admin/events/:id/stream-config
 
 Returns the effective stream configuration and RTMP ingest endpoints for an event. Used by the admin event detail page.
@@ -1151,6 +1192,102 @@ curl -X PUT http://localhost:3000/api/admin/settings \
     "playerDefaults": { "liveSyncDurationCount": 2, ... }
   }'
 ```
+
+---
+
+### GET /api/admin/config
+
+Returns all shared config entries with masked values. Shows whether each key is sourced from an environment variable or the database.
+
+**Request:**
+
+```bash
+curl http://localhost:3000/api/admin/config -b cookies.txt
+```
+
+**Success Response (200):**
+
+```json
+{
+  "data": [
+    {
+      "key": "INTERNAL_API_KEY",
+      "maskedValue": "dev-****-me",
+      "source": "env",
+      "updatedAt": null
+    },
+    {
+      "key": "PLAYBACK_SIGNING_SECRET",
+      "maskedValue": "aB3k****x2Qp",
+      "source": "database",
+      "updatedAt": "2025-06-01T12:00:00.000Z"
+    },
+    {
+      "key": "RTMP_AUTH_TOKEN",
+      "maskedValue": null,
+      "source": "not_set",
+      "updatedAt": null
+    }
+  ]
+}
+```
+
+**Permissions:** Requires `settings:manage` permission (admin or super_admin role).
+
+### PUT /api/admin/config
+
+Updates a single shared config value in the database.
+
+**Request:**
+
+```bash
+curl -X PUT http://localhost:3000/api/admin/config \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{ "key": "PLAYBACK_SIGNING_SECRET", "value": "new-secret-value-min-32-chars" }'
+```
+
+**Error Responses:**
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `400` | Invalid key or empty value | `{ "error": "Invalid config key" }` |
+| `403` | Insufficient permissions | `{ "error": "Forbidden" }` |
+
+### POST /api/admin/config/generate
+
+Generates a new cryptographically random value (32 bytes, base64url-encoded) for the specified config key and stores it in the database.
+
+**Request:**
+
+```bash
+curl -X POST http://localhost:3000/api/admin/config/generate \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{ "key": "PLAYBACK_SIGNING_SECRET" }'
+```
+
+**Success Response (200):**
+
+```json
+{
+  "data": {
+    "key": "PLAYBACK_SIGNING_SECRET",
+    "maskedValue": "aB3k****x2Qp"
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `400` | Invalid config key | `{ "error": "Invalid config key" }` |
+| `403` | Insufficient permissions | `{ "error": "Forbidden" }` |
+
+:::warning
+Regenerating `PLAYBACK_SIGNING_SECRET` invalidates all active JWTs immediately. Regenerating `INTERNAL_API_KEY` requires restarting all services that use it (HLS server, RTMP server) so they re-fetch the new value.
+:::
 
 ---
 

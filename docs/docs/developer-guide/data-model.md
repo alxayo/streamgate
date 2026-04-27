@@ -378,6 +378,41 @@ const effective = {
 The API routes for `GET /api/admin/settings` and `GET /api/internal/events/:id/stream-config` use upsert-or-return-hardcoded-defaults logic, so a missing `SystemSettings` row never causes a 500 error.
 :::
 
+## SystemConfig Model
+
+A key-value store for shared secrets (`INTERNAL_API_KEY`, `PLAYBACK_SIGNING_SECRET`, `RTMP_AUTH_TOKEN`) that need to be consistent across all services (Platform App, HLS server, RTMP server).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `key` | `String` | — | Primary key. Config key name (e.g., `"INTERNAL_API_KEY"`) |
+| `value` | `String` | — | Config value (plaintext) |
+| `updatedAt` | `DateTime` | auto | Last modification timestamp |
+
+### Config Resolution Pattern
+
+All route handlers that need shared secrets resolve them via `lib/system-config.ts`:
+
+1. **Environment variable** — checked first (backward-compatible, always wins)
+2. **Database row** — `SystemConfig` table lookup if env var is not set
+3. **Error** — throws if the value is missing from both sources
+
+Helper functions:
+- `getConfigValue(prisma, key)` — returns `string | null` (env → DB → null)
+- `requireConfigValue(prisma, key)` — returns `string` or throws
+- `setConfigValue(prisma, key, value)` — upserts a DB row
+- `getConfigValues(prisma, keys)` — batch fetch multiple keys
+
+### Seeding
+
+The `prisma/seed.ts` script generates initial secret values on first deploy:
+- Idempotent — skips keys that already exist in the database
+- Imports from environment variables if set, otherwise generates random values
+- Run manually with `npx prisma db seed` or automatically during `prisma migrate reset`
+
+### Admin Management
+
+Admins can view (masked), edit, and regenerate secrets at `/admin/config`. See [API Reference](./api-reference.md) for `GET/PUT /api/admin/config` and `POST /api/admin/config/generate`.
+
 ## Access Rules
 
 ### Platform-Level Validation (Token Validation Endpoint)
@@ -467,6 +502,12 @@ model ActiveSession {
   @@index([tokenId])
   @@index([sessionId])
   @@index([lastHeartbeat])
+}
+
+model SystemConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 ```
 

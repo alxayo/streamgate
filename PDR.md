@@ -100,7 +100,9 @@ Each access token is cryptographically unique, bound to exactly one stream/event
 | Browser → Platform App | HTTPS REST | Token validation, JWT issuance, JWT refresh, admin operations |
 | Browser → HLS Media Server | HTTPS + `Authorization` header | HLS manifest & segment requests with JWT playback token |
 | HLS Media Server → Platform App | HTTPS REST (internal) | Poll `/api/revocations` every 30s for revoked token codes |
-| Platform App → Database | Prisma ORM | CRUD for events, tokens, audit logs |
+| HLS Media Server → Platform App | HTTPS REST (internal) | Fetch shared secrets via `GET /api/internal/config` at startup |
+| RTMP Server → Platform App | HTTPS REST (internal) | Fetch shared secrets via `GET /api/internal/config` at startup |
+| Platform App → Database | Prisma ORM | CRUD for events, tokens, audit logs, shared config |
 
 ### 4.3 JWT Playback Token Design
 
@@ -225,7 +227,23 @@ Each token supports only **one active viewer at a time**. When a token is valida
 
 The active session is stored in the database (not in-memory) so it survives Platform App restarts and works across horizontally scaled instances.
 
-### 5.4 Access Rules (Platform App — Database Level)
+### 5.4 SystemConfig (Shared Secrets Store)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | String (PK) | Config key (e.g., `"INTERNAL_API_KEY"`) |
+| `value` | String | Config value (plaintext) |
+| `updatedAt` | DateTime | Last update timestamp (auto-managed) |
+
+Stores shared secrets (`INTERNAL_API_KEY`, `PLAYBACK_SIGNING_SECRET`, `RTMP_AUTH_TOKEN`) so all services can read them from the database instead of requiring synchronized environment variables across deployments.
+
+**Config resolution order:** Environment variable → DB row → error. This means env vars always win (backward-compatible), DB provides the default for multi-service deployments, and a missing value in both sources raises an error. Helper functions in `platform/src/lib/system-config.ts` implement this pattern.
+
+Services (HLS server, RTMP server) that need shared secrets fetch them at startup via `GET /api/internal/config?keys=KEY1,KEY2`, authenticated with `X-Internal-Api-Key`. Admins can view, edit, and regenerate secrets via the Admin Config page (`/admin/config`).
+
+The `prisma/seed.ts` script generates initial secret values on first deploy if they don't already exist in the database. It is idempotent (skips existing keys) and imports from environment variables when set.
+
+### 5.5 Access Rules (Platform App — Database Level)
 
 A token grants access if **all** of the following are true:
 1. `token.code` exists in the database
@@ -240,7 +258,7 @@ Rules 1–4 are checked **twice**:
 
 Rule 5 (single-device enforcement) is checked on token entry. On JWT refresh, the server verifies the session ID from the JWT matches the active session for that token.
 
-### 5.5 Access Rules (HLS Media Server — Per-Request Level)
+### 5.6 Access Rules (HLS Media Server — Per-Request Level)
 
 Every HLS request (manifest or segment) is validated by the HLS Media Server:
 1. `Authorization: Bearer <JWT>` header is present
@@ -768,6 +786,7 @@ This endpoint requires a valid access code to prevent event ID enumeration. It i
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/revocations?since=<ISO8601>` | Returns tokens revoked since the given timestamp |
+| GET | `/api/internal/config?keys=KEY1,KEY2` | Returns shared config values for requested keys |
 
 **GET `/api/revocations`**
 
@@ -792,6 +811,25 @@ Response (200):
 - `eventDeactivations` — Events that were deactivated since the given timestamp, with all their associated token codes (the HLS server adds these codes to its revocation cache to block access immediately)
 
 Authentication: This endpoint is protected with a shared API key (`X-Internal-Api-Key` header) rather than admin session auth, since it's called server-to-server.
+
+**GET `/api/internal/config`**
+
+Query parameters:
+- `keys` (required) — Comma-separated list of config keys. Allowed keys: `PLAYBACK_SIGNING_SECRET`, `RTMP_AUTH_TOKEN`, `INTERNAL_API_KEY`.
+
+Response (200):
+```json
+{
+  "data": {
+    "PLAYBACK_SIGNING_SECRET": "base64-encoded-secret",
+    "RTMP_AUTH_TOKEN": "hex-encoded-token"
+  }
+}
+```
+
+Error responses: `400` (missing or unknown keys), `401` (missing or invalid `X-Internal-Api-Key`).
+
+Authentication: Same `X-Internal-Api-Key` header as `/api/revocations`. Used by HLS server and RTMP server at startup to fetch shared secrets they need for JWT verification and RTMP auth.
 
 ### 10.4 HLS Media Server — Streaming API
 
