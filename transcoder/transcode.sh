@@ -266,6 +266,16 @@ build_ffmpeg_command() {
 FFMPEG_ARGS=$(build_ffmpeg_command "$CODEC" "$RENDITIONS")
 echo "  FFmpeg command: ffmpeg ${FFMPEG_ARGS}"
 
+# Pre-create per-rendition output directories.
+# FFmpeg's HLS muxer with the stream_%v pattern requires subdirectories
+# (stream_0/, stream_1/, stream_2/, etc.) to exist BEFORE it starts writing.
+# Without this, FFmpeg exits immediately with code 2 ("No such file or directory").
+num_renditions=$(echo "$RENDITIONS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+for i in $(seq 0 $((num_renditions - 1))); do
+  mkdir -p "${CODEC_OUTPUT_DIR}/stream_${i}"
+done
+echo "  Created ${num_renditions} output directories"
+
 # Step 4: Run FFmpeg with progress monitoring
 echo ""
 echo "[step 4/5] Running FFmpeg transcoding..."
@@ -297,6 +307,9 @@ eval ffmpeg ${FFMPEG_ARGS} -progress pipe:1 2>"${WORK_DIR}/ffmpeg_stderr.log" | 
 FFMPEG_EXIT=${PIPESTATUS[0]}
 if [ "$FFMPEG_EXIT" -ne 0 ]; then
   echo "[error] FFmpeg failed with exit code ${FFMPEG_EXIT}"
+  echo "[error] FFmpeg stderr output:"
+  cat "${WORK_DIR}/ffmpeg_stderr.log" >&2
+  # Also echo to stdout so it shows in container logs
   cat "${WORK_DIR}/ffmpeg_stderr.log"
   report_completion "failed" "FFmpeg exited with code ${FFMPEG_EXIT}"
   exit 1
