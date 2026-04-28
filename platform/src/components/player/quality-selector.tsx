@@ -3,10 +3,13 @@
 import { Settings } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
-interface QualityLevel {
+export interface QualityLevel {
   index: number;
   height: number;
+  /** Display label shown in the selector (e.g., "1080p" or "1080p (AV1)") */
   label: string;
+  /** RFC 6381 codec string from hls.js level, if available (e.g., "av01.0.08M.08,opus") */
+  codecs?: string;
 }
 
 interface QualitySelectorProps {

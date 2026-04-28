@@ -9,7 +9,9 @@ import { ProgressBar } from './progress-bar';
 import { TimeDisplay } from './time-display';
 import { FullscreenToggle } from './fullscreen-toggle';
 import { QualitySelector } from './quality-selector';
+import type { QualityLevel } from './quality-selector';
 import { LoadingOverlay } from './loading-overlay';
+import { getCodecLabel, hasMultipleCodecs } from '@/lib/codec-support';
 import type { PlayerConfig } from '@streaming/shared';
 
 /**
@@ -23,12 +25,6 @@ interface VideoPlayerProps {
   getToken: () => string;
   onStreamError?: (errorType: 'auth' | 'network') => void;
   playerConfig?: PlayerConfig;
-}
-
-interface QualityLevel {
-  index: number;
-  height: number;
-  label: string;
 }
 
 /**
@@ -111,11 +107,27 @@ export function VideoPlayer({ streamUrl, isLive, getToken, onStreamError, player
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
-        const levels = data.levels.map((level, i) => ({
+        // Build quality level list with codec info for the selector.
+        // When the master playlist has multiple codecs (e.g., AV1 + H.264),
+        // we include the codec name in the label so users can tell them apart.
+        const rawLevels = data.levels.map((level, i) => ({
           index: i,
           height: level.height,
-          label: `${level.height}p`,
+          codecs: level.codecSet || level.attrs?.CODECS,
         }));
+
+        const multiCodec = hasMultipleCodecs(rawLevels);
+
+        const levels: QualityLevel[] = rawLevels.map((l) => {
+          const codecLabel = multiCodec ? getCodecLabel(l.codecs) : null;
+          return {
+            index: l.index,
+            height: l.height,
+            label: codecLabel ? `${l.height}p (${codecLabel})` : `${l.height}p`,
+            codecs: l.codecs,
+          };
+        });
+
         setQualityLevels(levels);
         video.play().catch(() => {});
       });
