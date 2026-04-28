@@ -225,9 +225,12 @@ for i in $(seq 0 $((num_renditions - 1))); do
       FFMPEG_ARGS+=(-c:a:${i} aac -b:a:${i} "${abitrate}" -ac 2)
       ;;
     av1)
-      # AV1 via SVT-AV1 — best compression, slower encoding
+      # AV1 via SVT-AV1 — best compression, slower encoding.
+      # SVT-AV1 requires explicit rate control mode when using target bitrate:
+      #   -svtav1-params rc=1 sets VBR (variable bitrate) mode.
+      #   Without this, SVT defaults to CRF-only (rc=0) and rejects -b:v.
       FFMPEG_ARGS+=(-map 0:v:0 -map 0:a:0?)
-      FFMPEG_ARGS+=(-c:v:${i} libsvtav1 -preset 6 -crf 30)
+      FFMPEG_ARGS+=(-c:v:${i} libsvtav1 -preset 6 -svtav1-params "rc=1")
       FFMPEG_ARGS+=(-b:v:${i} "${vbitrate}" -maxrate:v:${i} "${vbitrate}")
       FFMPEG_ARGS+=(-s:v:${i} "${width}x${height}")
       FFMPEG_ARGS+=(-c:a:${i} libopus -b:a:${i} "${abitrate}")
