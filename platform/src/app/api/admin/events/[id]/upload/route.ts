@@ -19,6 +19,7 @@ import { uploadToBlob, deleteBlobIfExists } from '@/lib/blob-upload';
 import { checkPermission } from '@/lib/require-permission';
 import { getSystemDefaults } from '@/lib/stream-config';
 import { streamMultipartToDisk } from '@/lib/stream-upload';
+import { checkAndMarkStaleJobs } from '@/lib/transcode-staleness';
 import { triggerTranscoding } from '@/lib/trigger-transcode';
 import { ALLOWED_VIDEO_MIME_TYPES } from '@streaming/shared';
 import { unlink, rmdir } from 'fs/promises';
@@ -69,6 +70,38 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       },
     },
   });
+
+  // 4b. Staleness check — if the upload is in TRANSCODING status, check
+  //     whether any jobs have been stuck in PENDING/RUNNING for too long.
+  //     If a transcoder container crashes without calling back, this is
+  //     the safety net that eventually marks the job as FAILED.
+  if (upload && upload.status === 'TRANSCODING') {
+    const staleCount = await checkAndMarkStaleJobs(upload.id);
+    if (staleCount > 0) {
+      // Re-fetch so the response reflects the updated statuses
+      const refreshed = await prisma.upload.findUnique({
+        where: { id: upload.id },
+        include: {
+          transcodeJobs: {
+            orderBy: { codec: 'asc' },
+            select: {
+              id: true,
+              codec: true,
+              status: true,
+              progress: true,
+              errorMessage: true,
+              startedAt: true,
+              completedAt: true,
+            },
+          },
+        },
+      });
+      const serialised = refreshed
+        ? { ...refreshed, fileSize: refreshed.fileSize.toString() }
+        : null;
+      return NextResponse.json({ data: { upload: serialised } });
+    }
+  }
 
   // 5. Serialise — BigInt values (fileSize) are not natively JSON-serialisable,
   //    so we convert fileSize to a string before returning.
