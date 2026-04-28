@@ -89,6 +89,35 @@ param upstreamSasToken string = ''
 @secure()
 param upstreamAdminSasToken string = ''
 
+// --- VOD Transcoding Parameters ---
+// These are used by the Platform App to spawn ephemeral ACI containers
+// for multi-codec VOD transcoding (H.264, AV1, VP8, VP9).
+
+@description('Azure subscription ID — required for Platform App to create ACI containers for VOD transcoding')
+param azureSubscriptionId string = subscription().subscriptionId
+
+@description('ACR image for H.264 file transcoder (e.g., myacr.azurecr.io/streamgate-transcode-h264:v1)')
+param transcoderImageH264 string = ''
+
+@description('ACR image for AV1 file transcoder')
+param transcoderImageAv1 string = ''
+
+@description('ACR image for VP8 file transcoder')
+param transcoderImageVp8 string = ''
+
+@description('ACR image for VP9 file transcoder')
+param transcoderImageVp9 string = ''
+
+@description('CPU cores per transcoder container (default: 4)')
+param transcoderCpuCores string = '4'
+
+@description('Memory in GB per transcoder container (default: 8)')
+param transcoderMemoryGb string = '8'
+
+@description('Azure Storage connection string for transcoder blob access')
+@secure()
+param azureStorageConnectionString string = ''
+
 // ---------- Variables ----------
 
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location, environmentName)
@@ -369,6 +398,12 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
             value: rtmpAuthToken
           }
         ] : [])
+        ...(!empty(azureStorageConnectionString) ? [
+          {
+            name: 'azure-storage-connection-string'
+            value: azureStorageConnectionString
+          }
+        ] : [])
       ]
     }
     template: {
@@ -421,6 +456,55 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
               {
                 name: 'RTMP_AUTH_TOKEN'
                 secretRef: 'rtmp-auth-token'
+              }
+            ] : [])
+            // --- VOD Transcoding env vars ---
+            // These tell the Platform App how to spawn ephemeral ACI containers
+            // for multi-codec VOD transcoding (H.264, AV1, VP8, VP9).
+            {
+              name: 'AZURE_SUBSCRIPTION_ID'
+              value: azureSubscriptionId
+            }
+            {
+              name: 'AZURE_RESOURCE_GROUP'
+              value: resourceGroup().name
+            }
+            ...(!empty(transcoderImageH264) ? [
+              {
+                name: 'TRANSCODER_IMAGE_H264'
+                value: transcoderImageH264
+              }
+            ] : [])
+            ...(!empty(transcoderImageAv1) ? [
+              {
+                name: 'TRANSCODER_IMAGE_AV1'
+                value: transcoderImageAv1
+              }
+            ] : [])
+            ...(!empty(transcoderImageVp8) ? [
+              {
+                name: 'TRANSCODER_IMAGE_VP8'
+                value: transcoderImageVp8
+              }
+            ] : [])
+            ...(!empty(transcoderImageVp9) ? [
+              {
+                name: 'TRANSCODER_IMAGE_VP9'
+                value: transcoderImageVp9
+              }
+            ] : [])
+            {
+              name: 'TRANSCODER_CPU_CORES'
+              value: transcoderCpuCores
+            }
+            {
+              name: 'TRANSCODER_MEMORY_GB'
+              value: transcoderMemoryGb
+            }
+            ...(!empty(azureStorageConnectionString) ? [
+              {
+                name: 'AZURE_STORAGE_CONNECTION_STRING'
+                secretRef: 'azure-storage-connection-string'
               }
             ] : [])
           ]
