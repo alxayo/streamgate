@@ -90,11 +90,9 @@ param upstreamSasToken string = ''
 param upstreamAdminSasToken string = ''
 
 // --- VOD Transcoding Parameters ---
-// These are used by the Platform App to spawn ephemeral ACI containers
-// for multi-codec VOD transcoding (H.264, AV1, VP8, VP9).
-
-@description('Azure subscription ID — required for Platform App to create ACI containers for VOD transcoding')
-param azureSubscriptionId string = subscription().subscriptionId
+// These configure the Container Apps Jobs used for multi-codec VOD transcoding.
+// Each codec (H.264, AV1, VP8, VP9) gets its own pre-created Job definition.
+// The Platform App starts job executions on demand via the SDK.
 
 @description('ACR image for H.264 file transcoder (e.g., myacr.azurecr.io/streamgate-transcode-h264:v1)')
 param transcoderImageH264 string = ''
@@ -113,6 +111,9 @@ param transcoderCpuCores string = '4'
 
 @description('Memory in GB per transcoder container (default: 8)')
 param transcoderMemoryGb string = '8'
+
+@description('Maximum time in seconds for a transcoding job to complete (default: 7200 = 2 hours)')
+param transcoderReplicaTimeout int = 7200
 
 @description('Azure Storage connection string for transcoder blob access')
 @secure()
@@ -459,16 +460,19 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
               }
             ] : [])
             // --- VOD Transcoding env vars ---
-            // These tell the Platform App how to spawn ephemeral ACI containers
-            // for multi-codec VOD transcoding (H.264, AV1, VP8, VP9).
+            // The Platform App needs these to start Container Apps Job executions
+            // via the @azure/arm-appcontainers SDK (jobs.beginStart).
+            // The job definitions themselves are created as separate resources below.
             {
               name: 'AZURE_SUBSCRIPTION_ID'
-              value: azureSubscriptionId
+              value: subscription().subscriptionId
             }
             {
               name: 'AZURE_RESOURCE_GROUP'
               value: resourceGroup().name
             }
+            // Transcoder image refs — the launcher uses these to override the
+            // container image in each job execution's template.
             ...(!empty(transcoderImageH264) ? [
               {
                 name: 'TRANSCODER_IMAGE_H264'
@@ -501,12 +505,6 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'TRANSCODER_MEMORY_GB'
               value: transcoderMemoryGb
             }
-            ...(!empty(azureStorageConnectionString) ? [
-              {
-                name: 'AZURE_STORAGE_CONNECTION_STRING'
-                secretRef: 'azure-storage-connection-string'
-              }
-            ] : [])
           ]
           volumeMounts: [
             {
@@ -537,6 +535,90 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
 // This is handled by the deploy script's second Bicep pass — the first pass uses
 // placeholders, and the second pass provides the correct URLs via parameters.
 
+// ---------- VOD Transcoding Jobs ----------
+// One Container Apps Job per codec. All live in the same Container Apps Environment
+// as the platform + HLS server, so they share networking, logging, and registry access.
+// The Platform App starts executions on-demand via `jobs.beginStart()` from the SDK,
+// passing per-execution env var overrides (JOB_ID, EVENT_ID, CODEC, etc.).
+// Azure manages execution lifecycle — timeout, retry, and cleanup are automatic.
+
+// Map of codec names to their container images.
+// Only codecs with a configured image will get a job definition created.
+var transcoderImages = {
+  h264: transcoderImageH264
+  av1: transcoderImageAv1
+  vp8: transcoderImageVp8
+  vp9: transcoderImageVp9
+}
+
+// Create a Container Apps Job for each codec that has an image configured.
+// Job naming convention: sg-transcode-{codec} (e.g., sg-transcode-h264)
+@batchSize(1)
+resource transcoderJobs 'Microsoft.App/jobs@2024-03-01' = [for codec in filter(items(transcoderImages), item => !empty(item.value)): {
+  name: 'sg-transcode-${codec.key}'
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${identityId}': {}
+    }
+  }
+  properties: {
+    // Jobs run inside the same Container Apps Environment as platform + HLS
+    environmentId: containerEnv.id
+    configuration: {
+      // Manual trigger — the Platform App starts executions via SDK
+      triggerType: 'Manual'
+      // Maximum time before Azure kills a stuck execution (default: 2 hours)
+      replicaTimeout: transcoderReplicaTimeout
+      // Retry once on transient failures (container crash, OOM, etc.)
+      replicaRetryLimit: 1
+      // ACR pull credentials — same managed identity as platform + HLS apps
+      registries: [
+        {
+          server: registryLoginServer
+          identity: identityId
+        }
+      ]
+      // Secrets stored at the job level — referenced by execution env vars via secretRef.
+      // These do NOT change per-execution, so they're defined here rather than passed inline.
+      secrets: [
+        {
+          name: 'azure-storage-connection-string'
+          value: azureStorageConnectionString
+        }
+        {
+          name: 'internal-api-key'
+          value: internalApiKey
+        }
+      ]
+    }
+    // Default template — overridden per-execution by the Platform App's launcher.
+    // The image and env vars here serve as the base definition. When the launcher
+    // calls `jobs.beginStart({ template })`, the entire template is replaced,
+    // but secrets (above) remain accessible via secretRef.
+    template: {
+      containers: [
+        {
+          name: 'transcoder'
+          image: codec.value
+          env: [
+            // Per-codec identifier — also overridden at execution time
+            { name: 'CODEC', value: codec.key }
+            // Secrets referenced from the job-level secrets array
+            { name: 'AZURE_STORAGE_CONNECTION_STRING', secretRef: 'azure-storage-connection-string' }
+            { name: 'INTERNAL_API_KEY', secretRef: 'internal-api-key' }
+          ]
+          resources: {
+            cpu: json(transcoderCpuCores)
+            memory: '${transcoderMemoryGb}Gi'
+          }
+        }
+      ]
+    }
+  }
+}]
+
 // ---------- Outputs ----------
 
 output platformAppName string = platformApp.name
@@ -545,3 +627,5 @@ output platformAppFqdn string = platformApp.properties.configuration.ingress.fqd
 output hlsServerFqdn string = hlsApp.properties.configuration.ingress.fqdn
 output storageAccountName string = storageAccount.name
 output containerEnvName string = containerEnv.name
+// Names of created transcoder jobs (for reference/debugging)
+output transcoderJobNames array = [for (codec, i) in filter(items(transcoderImages), item => !empty(item.value)): 'sg-transcode-${codec.key}']
