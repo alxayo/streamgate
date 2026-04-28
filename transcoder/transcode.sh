@@ -130,8 +130,16 @@ download_blob() {
 
 # ---------- Main Transcoding Flow ----------
 
-# Trap errors — report failure on any unhandled exit
-trap 'report_completion "failed" "Transcoder crashed with exit code $?"' ERR
+# Trap errors — report failure on any unhandled exit.
+# If FFmpeg stderr was captured, dump it to container logs for debugging.
+trap '
+  exit_code=$?
+  if [ -f "${WORK_DIR}/ffmpeg_stderr.log" ]; then
+    echo "[error] FFmpeg stderr output:"
+    cat "${WORK_DIR}/ffmpeg_stderr.log"
+  fi
+  report_completion "failed" "Transcoder crashed with exit code ${exit_code}"
+' ERR
 
 # Step 1: Parse connection string
 echo ""
@@ -179,98 +187,113 @@ KEYFRAME_INTERVAL="${FORCE_KEYFRAME_INTERVAL:-4}"
 CODEC_OUTPUT_DIR="${OUTPUT_DIR}/${CODEC}"
 mkdir -p "$CODEC_OUTPUT_DIR"
 
-# Build FFmpeg arguments dynamically based on codec and renditions
-build_ffmpeg_command() {
-  local codec="$1"
-  local renditions_json="$2"
-  
-  # Common input args
-  local cmd="-i ${SOURCE_PATH} -hide_banner -y"
-  
-  # Count renditions
-  local num_renditions
-  num_renditions=$(echo "$renditions_json" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
-  
-  # Add codec-specific encoding settings for each rendition
-  for i in $(seq 0 $((num_renditions - 1))); do
-    local label width height vbitrate abitrate
-    label=$(echo "$renditions_json" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r['label'])")
-    width=$(echo "$renditions_json" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r['width'])")
-    height=$(echo "$renditions_json" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r['height'])")
-    vbitrate=$(echo "$renditions_json" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r['videoBitrate'])")
-    abitrate=$(echo "$renditions_json" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r.get('audioBitrate', '128k'))")
-    
-    # Video encoding args per codec
-    case "$codec" in
-      h264)
-        cmd="$cmd -map 0:v:0 -map 0:a:0?"
-        cmd="$cmd -c:v:${i} libx264 -preset medium -profile:v:${i} high -level:v:${i} 4.1"
-        cmd="$cmd -b:v:${i} ${vbitrate} -maxrate:v:${i} ${vbitrate} -bufsize:v:${i} $((${vbitrate%k} * 2))k"
-        cmd="$cmd -s:v:${i} ${width}x${height}"
-        cmd="$cmd -c:a:${i} aac -b:a:${i} ${abitrate} -ac 2"
-        ;;
-      av1)
-        cmd="$cmd -map 0:v:0 -map 0:a:0?"
-        cmd="$cmd -c:v:${i} libsvtav1 -preset 6 -crf 30"
-        cmd="$cmd -b:v:${i} ${vbitrate} -maxrate:v:${i} ${vbitrate}"
-        cmd="$cmd -s:v:${i} ${width}x${height}"
-        cmd="$cmd -c:a:${i} libopus -b:a:${i} ${abitrate}"
-        ;;
-      vp9)
-        cmd="$cmd -map 0:v:0 -map 0:a:0?"
-        cmd="$cmd -c:v:${i} libvpx-vp9 -quality good -speed 2 -row-mt 1"
-        cmd="$cmd -b:v:${i} ${vbitrate} -maxrate:v:${i} ${vbitrate}"
-        cmd="$cmd -s:v:${i} ${width}x${height}"
-        cmd="$cmd -c:a:${i} libopus -b:a:${i} ${abitrate}"
-        ;;
-      vp8)
-        cmd="$cmd -map 0:v:0 -map 0:a:0?"
-        cmd="$cmd -c:v:${i} libvpx -quality good -speed 2"
-        cmd="$cmd -b:v:${i} ${vbitrate} -maxrate:v:${i} ${vbitrate}"
-        cmd="$cmd -s:v:${i} ${width}x${height}"
-        cmd="$cmd -c:a:${i} libopus -b:a:${i} ${abitrate}"
-        ;;
-    esac
-    
-    echo "$label" >> "${CODEC_OUTPUT_DIR}/renditions.txt"
-  done
-  
-  # Force keyframes at regular intervals for clean HLS segment splits
-  cmd="$cmd -force_key_frames expr:gte(t,n_forced*${KEYFRAME_INTERVAL})"
-  
-  # HLS muxer settings — produce fMP4 segments with a master playlist
-  cmd="$cmd -f hls"
-  cmd="$cmd -hls_time ${HLS_TIME}"
-  cmd="$cmd -hls_playlist_type vod"
-  cmd="$cmd -hls_flags independent_segments"
-  cmd="$cmd -hls_segment_type fmp4"
-  cmd="$cmd -hls_segment_filename ${CODEC_OUTPUT_DIR}/stream_%v/segment_%04d.m4s"
-  cmd="$cmd -master_pl_name master.m3u8"
-  
-  # Variant stream mapping — one per rendition
-  local var_map=""
-  for i in $(seq 0 $((num_renditions - 1))); do
-    if [ -n "$var_map" ]; then
-      var_map="${var_map} "
-    fi
-    var_map="${var_map}v:${i},a:${i}"
-  done
-  cmd="$cmd -var_stream_map \"${var_map}\""
-  
-  # Output path pattern — each rendition gets its own subdirectory
-  cmd="$cmd ${CODEC_OUTPUT_DIR}/stream_%v/playlist.m3u8"
-  
-  echo "$cmd"
-}
+# ── Build FFmpeg arguments as a bash array ──
+# Why an array instead of a string + eval?
+#   Using eval on a command string is fragile: shell metacharacters like *
+#   (in -force_key_frames expr:gte(t,n_forced*4)) get glob-expanded, and
+#   quotes in -var_stream_map get stripped. A bash array preserves each
+#   argument exactly as-is — no quoting headaches, no glob expansion.
+FFMPEG_ARGS=()
 
-FFMPEG_ARGS=$(build_ffmpeg_command "$CODEC" "$RENDITIONS")
-echo "  FFmpeg command: ffmpeg ${FFMPEG_ARGS}"
+# Input file and global flags
+FFMPEG_ARGS+=(-i "$SOURCE_PATH" -hide_banner -y)
+
+# Count how many renditions we need to produce
+num_renditions=$(echo "$RENDITIONS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+
+# Add per-rendition encoding arguments based on the codec type.
+# Each rendition gets its own video stream (-map 0:v:0) and optional audio
+# stream (-map 0:a:0?). The "?" suffix means "skip if no audio track exists"
+# so FFmpeg doesn't crash on silent videos.
+for i in $(seq 0 $((num_renditions - 1))); do
+  # Extract rendition settings from the JSON array using python3
+  label=$(echo "$RENDITIONS" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r['label'])")
+  width=$(echo "$RENDITIONS" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r['width'])")
+  height=$(echo "$RENDITIONS" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r['height'])")
+  vbitrate=$(echo "$RENDITIONS" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r['videoBitrate'])")
+  abitrate=$(echo "$RENDITIONS" | python3 -c "import sys,json; r=json.load(sys.stdin)[$i]; print(r.get('audioBitrate', '128k'))")
+
+  # Video + audio encoding args — different for each codec
+  case "$CODEC" in
+    h264)
+      # H.264 via libx264 — most widely supported codec
+      FFMPEG_ARGS+=(-map 0:v:0 -map 0:a:0?)
+      FFMPEG_ARGS+=(-c:v:${i} libx264 -preset medium -profile:v:${i} high -level:v:${i} 4.1)
+      bufsize="$((${vbitrate%k} * 2))k"
+      FFMPEG_ARGS+=(-b:v:${i} "${vbitrate}" -maxrate:v:${i} "${vbitrate}" -bufsize:v:${i} "${bufsize}")
+      FFMPEG_ARGS+=(-s:v:${i} "${width}x${height}")
+      FFMPEG_ARGS+=(-c:a:${i} aac -b:a:${i} "${abitrate}" -ac 2)
+      ;;
+    av1)
+      # AV1 via SVT-AV1 — best compression, slower encoding
+      FFMPEG_ARGS+=(-map 0:v:0 -map 0:a:0?)
+      FFMPEG_ARGS+=(-c:v:${i} libsvtav1 -preset 6 -crf 30)
+      FFMPEG_ARGS+=(-b:v:${i} "${vbitrate}" -maxrate:v:${i} "${vbitrate}")
+      FFMPEG_ARGS+=(-s:v:${i} "${width}x${height}")
+      FFMPEG_ARGS+=(-c:a:${i} libopus -b:a:${i} "${abitrate}")
+      ;;
+    vp9)
+      # VP9 via libvpx-vp9 — good compression, moderate speed
+      FFMPEG_ARGS+=(-map 0:v:0 -map 0:a:0?)
+      FFMPEG_ARGS+=(-c:v:${i} libvpx-vp9 -quality good -speed 2 -row-mt 1)
+      FFMPEG_ARGS+=(-b:v:${i} "${vbitrate}" -maxrate:v:${i} "${vbitrate}")
+      FFMPEG_ARGS+=(-s:v:${i} "${width}x${height}")
+      FFMPEG_ARGS+=(-c:a:${i} libopus -b:a:${i} "${abitrate}")
+      ;;
+    vp8)
+      # VP8 via libvpx — legacy codec, fast encoding
+      FFMPEG_ARGS+=(-map 0:v:0 -map 0:a:0?)
+      FFMPEG_ARGS+=(-c:v:${i} libvpx -quality good -speed 2)
+      FFMPEG_ARGS+=(-b:v:${i} "${vbitrate}" -maxrate:v:${i} "${vbitrate}")
+      FFMPEG_ARGS+=(-s:v:${i} "${width}x${height}")
+      FFMPEG_ARGS+=(-c:a:${i} libopus -b:a:${i} "${abitrate}")
+      ;;
+  esac
+
+  # Record the label (e.g., "1080p") for the upload summary
+  echo "$label" >> "${CODEC_OUTPUT_DIR}/renditions.txt"
+done
+
+# Force keyframes at regular intervals so HLS segments start on clean I-frames.
+# The expression means: "force a keyframe every KEYFRAME_INTERVAL seconds".
+# IMPORTANT: This must be a single argument to FFmpeg — using an array element
+# prevents the shell from glob-expanding the * character.
+FFMPEG_ARGS+=(-force_key_frames "expr:gte(t,n_forced*${KEYFRAME_INTERVAL})")
+
+# HLS muxer settings — produce fragmented MP4 (fMP4) segments with a master playlist.
+# fMP4 is preferred over MPEG-TS because it supports modern codecs (AV1, VP9)
+# and enables byte-range requests for more efficient caching.
+FFMPEG_ARGS+=(-f hls)
+FFMPEG_ARGS+=(-hls_time "${HLS_TIME}")
+FFMPEG_ARGS+=(-hls_playlist_type vod)
+FFMPEG_ARGS+=(-hls_flags independent_segments)
+FFMPEG_ARGS+=(-hls_segment_type fmp4)
+FFMPEG_ARGS+=(-hls_segment_filename "${CODEC_OUTPUT_DIR}/stream_%v/segment_%04d.m4s")
+FFMPEG_ARGS+=(-master_pl_name master.m3u8)
+
+# Variant stream mapping — tells FFmpeg how to group video+audio for each rendition.
+# e.g., "v:0,a:0 v:1,a:1 v:2,a:2" means rendition 0 uses video stream 0 + audio 0, etc.
+# This MUST be a single string argument (not split by spaces) so FFmpeg sees all
+# rendition mappings together.
+var_map=""
+for i in $(seq 0 $((num_renditions - 1))); do
+  if [ -n "$var_map" ]; then
+    var_map="${var_map} "
+  fi
+  var_map="${var_map}v:${i},a:${i}"
+done
+FFMPEG_ARGS+=(-var_stream_map "$var_map")
+
+# Output path pattern — each rendition gets its own subdirectory (stream_0/, stream_1/, etc.)
+FFMPEG_ARGS+=("${CODEC_OUTPUT_DIR}/stream_%v/playlist.m3u8")
+
+# Log the full command for debugging (join array elements with spaces)
+echo "  FFmpeg command: ffmpeg ${FFMPEG_ARGS[*]}"
 
 # Pre-create per-rendition output directories.
 # FFmpeg's HLS muxer with the stream_%v pattern requires subdirectories
 # (stream_0/, stream_1/, stream_2/, etc.) to exist BEFORE it starts writing.
 # Without this, FFmpeg exits immediately with code 2 ("No such file or directory").
-num_renditions=$(echo "$RENDITIONS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
 for i in $(seq 0 $((num_renditions - 1))); do
   mkdir -p "${CODEC_OUTPUT_DIR}/stream_${i}"
 done
@@ -280,36 +303,56 @@ echo "  Created ${num_renditions} output directories"
 echo ""
 echo "[step 4/5] Running FFmpeg transcoding..."
 
-# Get source duration for progress calculation
+# Get source duration for progress calculation (ffprobe returns seconds as float)
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$SOURCE_PATH" 2>/dev/null | head -1)
 DURATION_INT=${DURATION%.*}
 echo "  Source duration: ${DURATION_INT}s"
 
-# Run FFmpeg — use progress pipe to report percentage
-# The eval is needed because FFMPEG_ARGS contains quoted var_stream_map
-eval ffmpeg ${FFMPEG_ARGS} -progress pipe:1 2>"${WORK_DIR}/ffmpeg_stderr.log" | \
-  while IFS='=' read -r key value; do
-    if [ "$key" = "out_time_ms" ] && [ -n "$value" ] && [ "$value" != "N/A" ]; then
-      # out_time_ms is in microseconds
-      current_seconds=$((value / 1000000))
-      if [ "$DURATION_INT" -gt 0 ]; then
-        # Map FFmpeg progress (0-100%) to our progress range (15-85%)
-        raw_pct=$((current_seconds * 100 / DURATION_INT))
-        if [ "$raw_pct" -gt 100 ]; then raw_pct=100; fi
-        # Scale to 15-85 range (15% for download, 85% for upload start)
-        mapped_pct=$((15 + raw_pct * 70 / 100))
-        report_progress "$mapped_pct" "Transcoding: ${current_seconds}s / ${DURATION_INT}s"
-      fi
-    fi
-  done
+# ── Run FFmpeg and capture exit code ──
+# We disable set -e around the FFmpeg pipeline so the ERR trap doesn't
+# fire before we can check the exit code and dump stderr for debugging.
+# FFmpeg progress output (-progress pipe:1) goes to a file, which we then
+# read in a loop to report percentage. This avoids using a pipe (which
+# interacts badly with set -e + pipefail — the ERR trap fires before
+# PIPESTATUS can be checked).
+FFMPEG_PROGRESS_FILE="${WORK_DIR}/ffmpeg_progress.log"
 
-# Check FFmpeg exit status
-FFMPEG_EXIT=${PIPESTATUS[0]}
+set +e
+ffmpeg "${FFMPEG_ARGS[@]}" \
+  -progress "${FFMPEG_PROGRESS_FILE}" \
+  2>"${WORK_DIR}/ffmpeg_stderr.log" &
+FFMPEG_PID=$!
+
+# Monitor progress in the background while FFmpeg runs.
+# Read the progress file every 5 seconds and extract out_time_ms to
+# calculate a percentage, then report it to the platform.
+while kill -0 "$FFMPEG_PID" 2>/dev/null; do
+  sleep 5
+  if [ -f "$FFMPEG_PROGRESS_FILE" ]; then
+    # Get the last reported out_time_ms from the progress file
+    last_time_ms=$(grep -o 'out_time_ms=[0-9]*' "$FFMPEG_PROGRESS_FILE" 2>/dev/null | tail -1 | cut -d= -f2)
+    if [ -n "$last_time_ms" ] && [ "$last_time_ms" != "N/A" ] && [ "$DURATION_INT" -gt 0 ]; then
+      current_seconds=$((last_time_ms / 1000000))
+      # Map FFmpeg progress (0-100%) to our overall progress range (15-85%)
+      raw_pct=$((current_seconds * 100 / DURATION_INT))
+      if [ "$raw_pct" -gt 100 ]; then raw_pct=100; fi
+      mapped_pct=$((15 + raw_pct * 70 / 100))
+      report_progress "$mapped_pct" "Transcoding: ${current_seconds}s / ${DURATION_INT}s"
+    fi
+  fi
+done
+
+# Wait for FFmpeg to fully exit and capture its exit code
+wait "$FFMPEG_PID"
+FFMPEG_EXIT=$?
+set -e
+
+# Check if FFmpeg succeeded
 if [ "$FFMPEG_EXIT" -ne 0 ]; then
   echo "[error] FFmpeg failed with exit code ${FFMPEG_EXIT}"
   echo "[error] FFmpeg stderr output:"
+  # Print stderr to both stderr and stdout so it appears in container logs
   cat "${WORK_DIR}/ffmpeg_stderr.log" >&2
-  # Also echo to stdout so it shows in container logs
   cat "${WORK_DIR}/ffmpeg_stderr.log"
   report_completion "failed" "FFmpeg exited with code ${FFMPEG_EXIT}"
   exit 1
