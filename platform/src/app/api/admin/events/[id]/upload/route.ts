@@ -20,7 +20,6 @@ import { getSystemDefaults } from '@/lib/stream-config';
 import { ALLOWED_VIDEO_MIME_TYPES } from '@streaming/shared';
 import { mkdir, writeFile, unlink, rmdir } from 'fs/promises';
 import path from 'path';
-import { cleanupCompletedJob } from '@/lib/transcoder-cleanup';
 
 // Next.js 14+ dynamic route params are delivered as a Promise
 interface RouteParams {
@@ -283,16 +282,10 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
 
   // ── Step 3: Look up the upload for this event ─────────────────────────
-  // We need the full upload record to know which file to delete from disk
-  // and which transcode jobs need container cleanup. We also include the
-  // transcodeJobs relation so we can clean up ACI containers.
+  // ── Step 3: Look up the upload for this event ─────────────────────────
+  // We need the full upload record to know which file to delete from disk.
   const upload = await prisma.upload.findUnique({
     where: { eventId: id },
-    include: {
-      transcodeJobs: {
-        select: { id: true, aciContainerGroup: true },
-      },
-    },
   });
 
   if (!upload) {
@@ -314,23 +307,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     );
   }
 
-  // ── Step 5: Clean up ACI containers for any transcode jobs ────────────
-  // Each transcode job may have spawned an Azure Container Instance. Even
-  // after the container exits, the resource still exists in Azure. We call
-  // cleanupCompletedJob for each job to delete those container groups.
-  // We use Promise.allSettled so a single ACI cleanup failure doesn't
-  // block the rest of the deletion.
-  for (const job of upload.transcodeJobs) {
-    try {
-      await cleanupCompletedJob(job.id);
-    } catch (err) {
-      // Log but don't fail — ACI cleanup is best-effort. The container
-      // may already be deleted or Azure might be temporarily unavailable.
-      console.error(`[admin-upload-delete] Failed to cleanup ACI for job ${job.id}:`, err);
-    }
-  }
-
-  // ── Step 6: Delete the uploaded file from disk ────────────────────────
+  // ── Step 5: Delete the uploaded file from disk ────────────────────────
   // The file lives at uploads/{eventId}/{fileName}. We try to remove the
   // file and then the directory. If either fails (e.g., file already
   // deleted), we log the error but continue with the DB cleanup.
@@ -351,11 +328,11 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     console.error(`[admin-upload-delete] Failed to delete file from disk:`, err);
   }
 
-  // ── Step 7: Delete the upload record from the database ────────────────
+  // ── Step 6: Delete the upload record from the database ────────────────
   // This also cascade-deletes associated TranscodeJob records (thanks to
   // the onDelete: Cascade relation in the Prisma schema).
   await prisma.upload.delete({ where: { id: upload.id } });
 
-  // ── Step 8: Return success ────────────────────────────────────────────
+  // ── Step 7: Return success ────────────────────────────────────────────
   return NextResponse.json({ data: { deleted: true } });
 }

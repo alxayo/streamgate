@@ -20,7 +20,6 @@ import { getSystemDefaults } from '@/lib/stream-config';
 import { ALLOWED_VIDEO_MIME_TYPES } from '@streaming/shared';
 import { mkdir, writeFile, unlink, rmdir } from 'fs/promises';
 import path from 'path';
-import { cleanupCompletedJob } from '@/lib/transcoder-cleanup';
 
 // Next.js 14+ dynamic route params are delivered as a Promise
 interface RouteParams {
@@ -316,19 +315,10 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'Event not found' }, { status: 404 });
   }
 
-  // ── Step 4: Fetch the upload with its transcode jobs ──────────────────
-  // We need the upload record to know the filename (for disk cleanup) and
-  // the transcode jobs to know which ACI containers to tear down.
+  // ── Step 4: Fetch the upload ────────────────────────────────────────
+  // We need the upload record to know the filename (for disk cleanup).
   const upload = await prisma.upload.findUnique({
     where: { eventId: event.id },
-    include: {
-      transcodeJobs: {
-        select: {
-          id: true,
-          aciContainerGroup: true,
-        },
-      },
-    },
   });
 
   // If no upload exists for this event, there's nothing to delete.
@@ -347,25 +337,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     );
   }
 
-  // ── Step 6: Clean up ACI container groups from transcoding ────────────
-  // When a video is transcoded, we spin up ephemeral Azure Container
-  // Instance containers (one per codec). Even after they finish, the ACI
-  // "container group" resource lingers in Azure. cleanupCompletedJob()
-  // deletes each one. We only call it for jobs that actually have an ACI
-  // container group assigned (aciContainerGroup is non-null).
-  for (const job of upload.transcodeJobs) {
-    if (job.aciContainerGroup) {
-      try {
-        await cleanupCompletedJob(job.id);
-      } catch (err) {
-        // Log but don't fail the whole delete — the container cleanup is
-        // best-effort. The periodic cleanup cron will catch any stragglers.
-        console.error(`Failed to cleanup ACI container for job ${job.id}:`, err);
-      }
-    }
-  }
-
-  // ── Step 7: Delete the uploaded file from disk ────────────────────────
+  // ── Step 6: Delete the uploaded file from disk ────────────────────────
   // The file lives at uploads/{eventId}/{fileName}. We use unlink() to
   // remove it. If the file is already gone (ENOENT), we ignore the error
   // — it may have been manually cleaned up or the upload failed before
@@ -381,7 +353,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     }
   }
 
-  // ── Step 8: Try to remove the event's upload directory ────────────────
+  // ── Step 7: Try to remove the event's upload directory ────────────────
   // After deleting the file, the directory may be empty. rmdir() only
   // succeeds on empty directories, so if there are other files (unlikely
   // but possible), it will fail silently — which is exactly what we want.
@@ -393,12 +365,12 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     // exist, or we might not have permissions. All are acceptable.
   }
 
-  // ── Step 9: Delete the Upload record from the database ────────────────
+  // ── Step 8: Delete the Upload record from the database ────────────────
   // The Prisma schema has `onDelete: Cascade` on the TranscodeJob →
   // Upload relation, so deleting the Upload automatically deletes all
   // associated TranscodeJob records. No manual job deletion needed.
   await prisma.upload.delete({ where: { id: upload.id } });
 
-  // ── Step 10: Return success ───────────────────────────────────────────
+  // ── Step 9: Return success ───────────────────────────────────────────
   return NextResponse.json({ data: { deleted: true } });
 }

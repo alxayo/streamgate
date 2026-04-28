@@ -177,8 +177,8 @@ export async function triggerTranscoding(
           data: {
             status: 'RUNNING',
             startedAt: new Date(),
-            // Store the container ID so we can check on it or stop it later
-            aciContainerGroup: result.containerId ?? null,
+            // Store the job execution name so we can track or cancel it later
+            executionName: result.containerId ?? null,
           },
         });
         launched++;
