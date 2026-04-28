@@ -2,7 +2,7 @@
 // Admin Retranscode — POST /api/admin/events/:id/retranscode
 // =========================================================================
 // Allows admins to retry transcoding for an upload that previously failed.
-// This is useful when a transient error (network timeout, ACI crash, etc.)
+// This is useful when a transient error (network timeout, container crash, etc.)
 // caused the original transcode to fail and the admin wants to try again
 // without re-uploading the file.
 //
@@ -11,7 +11,7 @@
 //   2. Checks that the event has an upload in FAILED state
 //   3. Deletes any existing TranscodeJob records for the upload
 //      (so the transcoder starts fresh with no stale state)
-//   4. Calls triggerTranscoding() to launch new ACI containers
+//   4. Calls triggerTranscoding() to launch new Container Apps Job executions
 //   5. Returns the number of jobs launched and failed
 //
 // Auth: Admin session cookie + events:manage permission.
@@ -81,7 +81,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
 
   // ── Step 5: Delete existing TranscodeJob records ──────────────────────
   // Remove all previous transcode jobs for this upload so we start fresh.
-  // Old jobs may have stale ACI container references and error messages
+  // Old jobs may have stale execution references and error messages
   // that are no longer relevant. deleteMany is safe even if there are no
   // existing jobs (it just deletes zero rows).
   await prisma.transcodeJob.deleteMany({
@@ -89,8 +89,8 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
   });
 
   // ── Step 6: Trigger new transcoding ───────────────────────────────────
-  // triggerTranscoding() creates new TranscodeJob records and launches ACI
-  // containers for each configured codec. It returns counts of how many
+  // triggerTranscoding() creates new TranscodeJob records and launches
+  // Container Apps Job executions for each configured codec. It returns
   // jobs were successfully launched vs. how many failed to launch.
   const { launched, failed } = await triggerTranscoding(upload.id, event.id);
 

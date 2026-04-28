@@ -269,8 +269,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 // =========================================================================
 // Creator Upload Delete — DELETE /api/creator/events/:id/upload
 // =========================================================================
-// Deletes an upload and its associated resources (files on disk, ACI
-// container groups from transcoding). The creator can use this to remove
+// Deletes an upload and its associated resources (files on disk, transcode
+// job records). The creator can use this to remove
 // an uploaded file and start fresh, or to clean up after a failed upload.
 //
 // Auth: Creator session cookie (must own the event's channel).
@@ -282,10 +282,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 //     in-progress operations that shouldn't be interrupted — returns 409)
 //
 // Cleanup steps:
-//   1. Clean up any ACI container groups left over from transcoding
-//   2. Delete the uploaded file from disk
-//   3. Try to remove the now-empty upload directory
-//   4. Delete the Upload record from the database (cascade deletes jobs)
+//   1. Delete the uploaded file from disk
+//   2. Try to remove the now-empty upload directory
+//   3. Delete the Upload record from the database (cascade deletes jobs)
 //
 // Response: { data: { deleted: true } }
 // =========================================================================

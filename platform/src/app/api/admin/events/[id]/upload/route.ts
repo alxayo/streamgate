@@ -265,8 +265,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 }
 
 // ── DELETE handler — Admin delete an upload and its associated files ─────
-// Removes the upload record, cleans up any ACI containers from transcode
-// jobs, and deletes the uploaded file from disk. This lets admins clean up
+// Removes the upload record and deletes the uploaded file from disk. This lets admins clean up
 // uploads that are in a terminal state (READY, FAILED, or UPLOADED).
 //
 // Returns: { data: { deleted: true } } on success.
