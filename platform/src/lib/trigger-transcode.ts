@@ -168,7 +168,8 @@ export async function triggerTranscoding(
 
   await Promise.all(
     jobs.map(async (job) => {
-      const result = results.get(job.id);
+      // The results map is keyed by codec name (e.g., "h264"), not job ID.
+      const result = results.get(job.codec);
 
       if (result?.success) {
         // Container started successfully — update the job to RUNNING
