@@ -244,12 +244,14 @@ for i in $(seq 0 $((num_renditions - 1))); do
       FFMPEG_ARGS+=(-c:a:${i} libopus -b:a:${i} "${abitrate}")
       ;;
     vp8)
-      # VP8 via libvpx — legacy codec, fast encoding
+      # VP8 via libvpx — legacy codec, fast encoding.
+      # Uses AAC audio instead of Opus because VP8 requires MPEG-TS segments
+      # (not fMP4), and MPEG-TS has better compatibility with AAC.
       FFMPEG_ARGS+=(-map 0:v:0 -map 0:a:0?)
       FFMPEG_ARGS+=(-c:v:${i} libvpx -quality good -speed 2)
       FFMPEG_ARGS+=(-b:v:${i} "${vbitrate}" -maxrate:v:${i} "${vbitrate}")
       FFMPEG_ARGS+=(-s:v:${i} "${width}x${height}")
-      FFMPEG_ARGS+=(-c:a:${i} libopus -b:a:${i} "${abitrate}")
+      FFMPEG_ARGS+=(-c:a:${i} aac -b:a:${i} "${abitrate}" -ac 2)
       ;;
   esac
 
@@ -263,15 +265,27 @@ done
 # prevents the shell from glob-expanding the * character.
 FFMPEG_ARGS+=(-force_key_frames "expr:gte(t,n_forced*${KEYFRAME_INTERVAL})")
 
-# HLS muxer settings — produce fragmented MP4 (fMP4) segments with a master playlist.
-# fMP4 is preferred over MPEG-TS because it supports modern codecs (AV1, VP9)
-# and enables byte-range requests for more efficient caching.
+# HLS muxer settings — produce segments with a master playlist.
+# Codec determines segment container format:
+#   - H.264, AV1, VP9 → fMP4 (fragmented MP4) — supports modern codecs,
+#     enables byte-range requests, better caching
+#   - VP8 → MPEG-TS — VP8 is not supported in MP4/fMP4 containers,
+#     so we fall back to MPEG-TS which accepts VP8
 FFMPEG_ARGS+=(-f hls)
 FFMPEG_ARGS+=(-hls_time "${HLS_TIME}")
 FFMPEG_ARGS+=(-hls_playlist_type vod)
 FFMPEG_ARGS+=(-hls_flags independent_segments)
-FFMPEG_ARGS+=(-hls_segment_type fmp4)
-FFMPEG_ARGS+=(-hls_segment_filename "${CODEC_OUTPUT_DIR}/stream_%v/segment_%04d.m4s")
+
+if [ "$CODEC" = "vp8" ]; then
+  # VP8 cannot be muxed into fMP4 (no codec tag in MP4 container).
+  # Use MPEG-TS segments instead (.ts extension).
+  FFMPEG_ARGS+=(-hls_segment_type mpegts)
+  FFMPEG_ARGS+=(-hls_segment_filename "${CODEC_OUTPUT_DIR}/stream_%v/segment_%04d.ts")
+else
+  # fMP4 for all modern codecs (H.264, AV1, VP9)
+  FFMPEG_ARGS+=(-hls_segment_type fmp4)
+  FFMPEG_ARGS+=(-hls_segment_filename "${CODEC_OUTPUT_DIR}/stream_%v/segment_%04d.m4s")
+fi
 FFMPEG_ARGS+=(-master_pl_name master.m3u8)
 
 # Variant stream mapping — tells FFmpeg how to group video+audio for each rendition.
