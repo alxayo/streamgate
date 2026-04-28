@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { uploadToBlob, deleteBlobIfExists } from '@/lib/blob-upload';
 import { checkPermission } from '@/lib/require-permission';
 import { getSystemDefaults } from '@/lib/stream-config';
 import { streamMultipartToDisk } from '@/lib/stream-upload';
@@ -182,21 +183,53 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   }
 
   // ── Step 9: Create the Upload record ──────────────────────────────────
-  // File is now safely on disk. Create the DB record with UPLOADED status
-  // so the transcoder knows it's ready to be picked up.
-  const blobPath = `uploads/${event.id}/${streamResult.fileName}`;
+  // File is now safely on disk. Create the DB record with UPLOADED status.
+  // The blobPath stores the blob name within the vod-uploads container:
+  //   "{eventId}/{filename}" — this is what the transcoder uses to download.
+  const blobName = `${event.id}/${streamResult.fileName}`;
   const upload = await prisma.upload.create({
     data: {
       eventId: event.id,
       fileName: streamResult.fileName,
       fileSize: BigInt(streamResult.fileSize),
       mimeType: streamResult.mimeType,
-      blobPath,
+      blobPath: blobName,
       status: 'UPLOADED',
     },
   });
 
-  // ── Step 10: Trigger transcoding ────────────────────────────────────────
+  // ── Step 10: Upload file to Azure Blob Storage ──────────────────────
+  // The transcoder containers can't access the platform's local disk, so
+  // we stream the file to Azure Blob Storage. In dev mode (no Azure
+  // credentials), this is a no-op and transcoding runs in mock mode.
+  // If blob upload fails, we delete the Upload record so the user can
+  // retry — the local file is still on disk for the retry attempt.
+  try {
+    const blobResult = await uploadToBlob(
+      streamResult.filePath,
+      event.id,
+      streamResult.fileName,
+    );
+
+    // Update blobPath if the blob was actually uploaded (production mode)
+    if (blobResult.uploaded) {
+      await prisma.upload.update({
+        where: { id: upload.id },
+        data: { blobPath: blobResult.blobName },
+      });
+    }
+  } catch (blobErr) {
+    // Blob upload failed — delete the Upload record so the unique
+    // constraint on eventId doesn't block retries.
+    console.error('[upload] Blob upload failed, rolling back:', blobErr);
+    await prisma.upload.delete({ where: { id: upload.id } });
+    return NextResponse.json(
+      { error: 'Failed to upload file to storage. Please try again.' },
+      { status: 500 },
+    );
+  }
+
+  // ── Step 11: Trigger transcoding ────────────────────────────────────────
   // Launch transcoder containers for each enabled codec (e.g. H.264, AV1).
   // This is fire-and-forget from the HTTP response perspective — we return
   // 202 immediately and the UI polls for progress via the GET endpoint.
@@ -210,7 +243,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     console.error('[upload] Failed to trigger transcoding:', err);
   }
 
-  // ── Step 11: Return 202 Accepted ──────────────────────────────────────
+  // ── Step 12: Return 202 Accepted ──────────────────────────────────────
   // 202 signals that the upload has been accepted for processing. The
   // admin UI can poll the GET endpoint for transcoding progress.
   // Re-read the upload status since triggerTranscoding may have updated it
@@ -298,11 +331,16 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     console.error(`[admin-upload-delete] Failed to delete file from disk:`, err);
   }
 
-  // ── Step 6: Delete the upload record from the database ────────────────
+  // ── Step 6: Delete the source file from Azure Blob Storage ───────────
+  // Best-effort cleanup — if the blob doesn't exist or deletion fails,
+  // we log the error but continue. The DB record is the source of truth.
+  await deleteBlobIfExists(upload.blobPath);
+
+  // ── Step 7: Delete the upload record from the database ────────────────
   // This also cascade-deletes associated TranscodeJob records (thanks to
   // the onDelete: Cascade relation in the Prisma schema).
   await prisma.upload.delete({ where: { id: upload.id } });
 
-  // ── Step 7: Return success ────────────────────────────────────────────
+  // ── Step 8: Return success ────────────────────────────────────────────
   return NextResponse.json({ data: { deleted: true } });
 }
