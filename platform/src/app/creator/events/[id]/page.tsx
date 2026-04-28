@@ -155,7 +155,10 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
         return res.json();
       })
       .then(data => {
-        if (data?.data) setUploadData(data.data);
+        // data.data is { upload: UploadObj | null }
+        // Only set uploadData when an actual upload record exists
+        if (data?.data?.upload) setUploadData(data.data.upload);
+        else setUploadData(null);
       })
       .catch(() => {});
   }, [id]);
