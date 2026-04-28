@@ -106,6 +106,43 @@ Set these in `hls-server/.env` or the root `.env` file.
 
 ---
 
+## VOD Upload & Transcoding Variables (Azure)
+
+These variables are required **only** when deploying to Azure with VOD upload support. In local development, VOD transcoding is not available — it requires Azure Container Apps Jobs to run the FFmpeg transcoder containers.
+
+### Platform App (VOD)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AZURE_STORAGE_CONNECTION_STRING` | Conditional | — | Azure Storage account connection string. Required for VOD uploads. Used to stream uploaded files into the `vod-uploads` blob container and read HLS output from `hls-content`. |
+| `AZURE_SUBSCRIPTION_ID` | Conditional | — | Azure subscription ID. Required for launching transcoder Container Apps Jobs via the `@azure/arm-appcontainers` SDK. |
+| `AZURE_RESOURCE_GROUP` | Conditional | — | Azure resource group containing the transcoder Container Apps Jobs. |
+| `AZURE_MANAGED_IDENTITY_CLIENT_ID` | Conditional | — | Client ID of the user-assigned managed identity used to authenticate when launching transcoder jobs. |
+| `TRANSCODER_IMAGE_H264` | Conditional | — | ACR image URI for the H.264 transcoder job (e.g., `myacr.azurecr.io/transcoder:v1234`). |
+| `TRANSCODER_IMAGE_AV1` | ❌ | — | ACR image URI for the AV1 transcoder job. Only needed if AV1 codec is enabled in system settings. |
+| `TRANSCODER_IMAGE_VP9` | ❌ | — | ACR image URI for the VP9 transcoder job. Only needed if VP9 codec is enabled. |
+| `TRANSCODER_IMAGE_VP8` | ❌ | — | ACR image URI for the VP8 transcoder job. Only needed if VP8 codec is enabled. |
+| `PLATFORM_APP_URL` | Conditional | — | The platform's own public URL. Used by transcoder containers to send progress and completion callbacks. When using custom domains, set this to the custom domain (e.g., `https://watch.example.com`). |
+
+:::info Conditional = Azure VOD only
+Variables marked "Conditional" are required only if you enable VOD uploads. If you only use live streaming, these can be omitted entirely.
+:::
+
+### Azure Blob Containers
+
+VOD functionality uses two blob containers in the Azure Storage account:
+
+| Container | Purpose |
+|-----------|---------|
+| `vod-uploads` | Stores the original uploaded video files. Path: `uploads/{eventId}/{filename}` |
+| `hls-content` | Stores transcoded HLS output. Path: `{eventId}/{codec}/stream_{N}/playlist.m3u8` + segments |
+
+### Admin-Configurable Upload Settings
+
+The maximum upload file size is configurable from the Admin Console under **Settings**. The default is **5 GB**. This value is stored in the `SystemSettings.maxUploadSizeBytes` database column and can be changed at runtime without restarting services.
+
+---
+
 ## Content Source Modes
 
 The HLS server supports three modes for sourcing stream content, determined by which environment variables are set:
