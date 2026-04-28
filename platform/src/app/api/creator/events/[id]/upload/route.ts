@@ -18,6 +18,7 @@ import { prisma } from '@/lib/prisma';
 import { requireCreator } from '@/lib/creator-session';
 import { getSystemDefaults } from '@/lib/stream-config';
 import { streamMultipartToDisk } from '@/lib/stream-upload';
+import { triggerTranscoding } from '@/lib/trigger-transcode';
 import { ALLOWED_VIDEO_MIME_TYPES } from '@streaming/shared';
 import { unlink, rmdir } from 'fs/promises';
 import path from 'path';
@@ -192,14 +193,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     },
   });
 
-  // ── Step 10: Return 202 Accepted ──────────────────────────────────────
+  // ── Step 10: Trigger transcoding ────────────────────────────────────────
+  // Launch transcoder containers for each enabled codec (e.g. H.264, AV1).
+  // Fire-and-forget — we return 202 immediately and the UI polls for progress.
+  let transcodeResult = { launched: 0, failed: 0 };
+  try {
+    transcodeResult = await triggerTranscoding(upload.id, event.id);
+  } catch (err) {
+    console.error('[upload] Failed to trigger transcoding:', err);
+  }
+
+  // ── Step 11: Return 202 Accepted ──────────────────────────────────────
+  const freshUpload = await prisma.upload.findUnique({
+    where: { id: upload.id },
+    select: { status: true },
+  });
+
   return NextResponse.json(
     {
       data: {
         uploadId: upload.id,
-        status: 'UPLOADED',
+        status: freshUpload?.status ?? upload.status,
         fileName: streamResult.fileName,
         fileSize: streamResult.fileSize.toString(),
+        transcodingLaunched: transcodeResult.launched,
+        transcodingFailed: transcodeResult.failed,
       },
     },
     { status: 202 },

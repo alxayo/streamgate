@@ -18,6 +18,7 @@ import { prisma } from '@/lib/prisma';
 import { checkPermission } from '@/lib/require-permission';
 import { getSystemDefaults } from '@/lib/stream-config';
 import { streamMultipartToDisk } from '@/lib/stream-upload';
+import { triggerTranscoding } from '@/lib/trigger-transcode';
 import { ALLOWED_VIDEO_MIME_TYPES } from '@streaming/shared';
 import { unlink, rmdir } from 'fs/promises';
 import path from 'path';
@@ -195,16 +196,39 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     },
   });
 
-  // ── Step 10: Return 202 Accepted ──────────────────────────────────────
+  // ── Step 10: Trigger transcoding ────────────────────────────────────────
+  // Launch transcoder containers for each enabled codec (e.g. H.264, AV1).
+  // This is fire-and-forget from the HTTP response perspective — we return
+  // 202 immediately and the UI polls for progress via the GET endpoint.
+  // If no transcoder images are configured (dev mode), this is a no-op.
+  let transcodeResult = { launched: 0, failed: 0 };
+  try {
+    transcodeResult = await triggerTranscoding(upload.id, event.id);
+  } catch (err) {
+    // Log but don't fail the upload — the file is saved and admin can
+    // retry transcoding via the retranscode endpoint.
+    console.error('[upload] Failed to trigger transcoding:', err);
+  }
+
+  // ── Step 11: Return 202 Accepted ──────────────────────────────────────
   // 202 signals that the upload has been accepted for processing. The
   // admin UI can poll the GET endpoint for transcoding progress.
+  // Re-read the upload status since triggerTranscoding may have updated it
+  // from UPLOADED → TRANSCODING.
+  const freshUpload = await prisma.upload.findUnique({
+    where: { id: upload.id },
+    select: { status: true },
+  });
+
   return NextResponse.json(
     {
       data: {
         uploadId: upload.id,
-        status: 'UPLOADED',
+        status: freshUpload?.status ?? upload.status,
         fileName: streamResult.fileName,
         fileSize: streamResult.fileSize.toString(),
+        transcodingLaunched: transcodeResult.launched,
+        transcodingFailed: transcodeResult.failed,
       },
     },
     { status: 202 },
