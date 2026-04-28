@@ -158,6 +158,25 @@ resource segmentCacheShare 'Microsoft.Storage/storageAccounts/fileServices/share
   }
 }
 
+// ---------- Blob Containers ----------
+
+// Reference the blob service on the existing storage account
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' existing = {
+  name: 'default'
+  parent: storageAccount
+}
+
+// Blob container for VOD source uploads. The platform uploads creator video
+// files here after saving to disk, and transcoder containers download from
+// here. Blob name convention: {eventId}/{filename}
+resource vodUploadsContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  name: 'vod-uploads'
+  parent: blobService
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
 // ---------- Container Apps Environment Storage Mounts ----------
 
 resource streamgateDataStorage 'Microsoft.App/managedEnvironments/storages@2024-03-01' = {
@@ -453,6 +472,15 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'ADMIN_ALLOWED_IP'
               value: adminAllowedIp
             }
+            // Azure Storage connection string — needed by the platform to upload
+            // VOD source files to blob storage after the creator's upload completes.
+            // Only set when azureStorageConnectionString param is provided.
+            ...(!empty(azureStorageConnectionString) ? [
+              {
+                name: 'AZURE_STORAGE_CONNECTION_STRING'
+                secretRef: 'azure-storage-connection-string'
+              }
+            ] : [])
             ...(!empty(rtmpAuthToken) ? [
               {
                 name: 'RTMP_AUTH_TOKEN'
