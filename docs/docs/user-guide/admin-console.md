@@ -299,6 +299,7 @@ Abandoned sessions are automatically cleaned up after the configured timeout (de
 ### Before the Event
 - Create the event well in advance
 - Generate tokens in batches with descriptive labels
+- For VOD events, upload the video file and wait for transcoding to complete before distributing tokens
 - Export and distribute tokens to your audience
 - Test with one token to verify the stream works end-to-end
 
@@ -311,6 +312,78 @@ Abandoned sessions are automatically cleaned up after the configured timeout (de
 - Review session statistics
 - Revoke any unused tokens if not needed for VOD rewatch
 - Archive the event when the access window closes
+
+---
+
+## VOD Upload & Transcoding
+
+StreamGate supports Video-on-Demand (VOD) uploads in addition to live streaming. Creators and admins can upload a pre-recorded video file for an event, and the system transcodes it into multiple quality levels and codecs for HLS playback.
+
+### Uploading a Video
+
+From an event's detail page:
+
+1. Click the **"Upload Video"** button (or the upload area)
+2. Select a video file (MP4, MOV, MKV, WebM, AVI, or MPEG-TS)
+3. The file uploads directly to Azure Blob Storage with a real-time progress bar
+4. Once the upload completes, transcoding starts automatically
+
+:::info File size limit
+The maximum upload size is configurable in **Settings** (default: 5 GB). Large files are streamed in chunks — the browser does not need to load the entire file into memory.
+:::
+
+### Transcoding Pipeline
+
+After upload, the platform launches one transcoding job per enabled codec:
+
+| Codec | Container | Description |
+|-------|-----------|-------------|
+| **H.264** | fMP4 segments | Most compatible — works on all devices and browsers |
+| **AV1** | fMP4 segments | Best compression efficiency, newer devices only |
+| **VP9** | fMP4 segments | Good compression, wide browser support |
+| **VP8** | MPEG-TS segments | Legacy format, broadest compatibility |
+
+Each job runs as an independent Azure Container Apps Job and reports progress back to the platform.
+
+### Monitoring Transcoding
+
+The event detail page shows transcoding status in real time:
+
+- **Per-codec progress bars** — Shows percentage completion for each codec (H.264, AV1, etc.)
+- **Job status** — Queued → Running → Completed / Failed
+- **Overall status** — The upload is marked READY when all enabled codecs complete successfully
+
+| Upload Status | Meaning |
+|---------------|---------|
+| **UPLOADING** | File is being uploaded to blob storage |
+| **UPLOADED** | Upload complete, waiting for transcoding to start |
+| **TRANSCODING** | One or more transcoder jobs are running |
+| **READY** | All codec transcodes completed — video is playable |
+| **FAILED** | One or more transcodes failed (partial playback may still work if some codecs succeeded) |
+
+### Re-Transcoding
+
+If transcoding fails or you want to re-encode with different settings:
+
+1. Open the event detail page
+2. Click **"Re-transcode"**
+3. New transcoding jobs are launched for all enabled codecs
+
+### Preview Playback
+
+Once at least one codec completes transcoding:
+
+1. The event detail page shows a **"Preview"** button
+2. Click to open the HLS player with a short-lived admin preview token
+3. The player loads the multi-codec master playlist and auto-selects the best quality
+
+### Configuring Codecs and Quality
+
+Navigate to **Settings** to configure:
+
+- **Enabled codecs** — Choose which codecs to transcode (H.264 is always enabled)
+- **Rendition ladders** — Per-codec quality levels (resolution, bitrate). Default: 1080p, 720p, 480p for H.264
+- **Maximum upload size** — File size limit for VOD uploads (default: 5 GB)
 
 ---
 
