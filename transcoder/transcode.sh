@@ -52,10 +52,12 @@ mkdir -p "$SOURCE_DIR" "$OUTPUT_DIR"
 
 # Parse the connection string to get account name and key
 # Format: DefaultEndpointsProtocol=https;AccountName=xxx;AccountKey=xxx;EndpointSuffix=core.windows.net
+# Note: We use sed instead of grep -P because Alpine/BusyBox grep
+# doesn't support Perl regex (-P flag).
 parse_connection_string() {
   local conn_str="$1"
-  STORAGE_ACCOUNT_NAME=$(echo "$conn_str" | grep -oP 'AccountName=\K[^;]+')
-  STORAGE_ACCOUNT_KEY=$(echo "$conn_str" | grep -oP 'AccountKey=\K[^;]+')
+  STORAGE_ACCOUNT_NAME=$(echo "$conn_str" | sed -n 's/.*AccountName=\([^;]*\).*/\1/p')
+  STORAGE_ACCOUNT_KEY=$(echo "$conn_str" | sed -n 's/.*AccountKey=\([^;]*\).*/\1/p')
   export STORAGE_ACCOUNT_NAME STORAGE_ACCOUNT_KEY
 }
 
