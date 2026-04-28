@@ -13,8 +13,13 @@ services:
       HLS_SERVER_BASE_URL: "http://localhost:4000"
       NEXT_PUBLIC_APP_NAME: "StreamGate"
       SESSION_TIMEOUT_SECONDS: "60"
+      # --- VOD Transcoding (local dev) ---
+      # Platform App URL used by transcoder containers for callbacks
+      PLATFORM_APP_URL: "http://host.docker.internal:3000"
     volumes:
       - platform-data:/app/platform/prisma
+      # Mount uploads directory so the platform app can write uploaded files
+      - ./uploads:/app/platform/uploads
 
   hls-server:
     build:
@@ -30,6 +35,72 @@ services:
       CORS_ALLOWED_ORIGIN: "http://localhost:3000"
       PORT: "4000"
     volumes:
+      - ./streams:/streams
+
+  # =========================================================================
+  # VOD File Transcoder (local development)
+  # =========================================================================
+  # Ephemeral container that transcodes uploaded video files into multi-codec
+  # HLS streams. In production, these run as Azure Container Instances (ACI).
+  # Locally, use `docker compose run` to start one per codec:
+  #
+  #   docker compose run --rm file-transcoder-h264
+  #   docker compose run --rm file-transcoder-av1
+  #
+  # The "transcode" profile prevents these from starting with `docker compose up`.
+  # They are only started on-demand when the Platform App triggers transcoding.
+  # =========================================================================
+
+  file-transcoder-h264:
+    build:
+      context: ../rtmp-go/azure/file-transcoder
+      dockerfile: Dockerfile
+    profiles: ["transcode"]
+    environment:
+      CODEC: "h264"
+      INTERNAL_API_KEY: "dev-internal-api-key-change-me"
+      # Job-specific vars (JOB_ID, EVENT_ID, SOURCE_BLOB_URL, etc.) are set
+      # per invocation via `docker compose run -e JOB_ID=... file-transcoder-h264`
+    volumes:
+      # Shared uploads directory — transcoder reads source files from here
+      - ./uploads:/uploads:ro
+      # Shared streams directory — transcoder writes HLS output here
+      - ./streams:/streams
+
+  file-transcoder-av1:
+    build:
+      context: ../rtmp-go/azure/file-transcoder
+      dockerfile: Dockerfile
+    profiles: ["transcode"]
+    environment:
+      CODEC: "av1"
+      INTERNAL_API_KEY: "dev-internal-api-key-change-me"
+    volumes:
+      - ./uploads:/uploads:ro
+      - ./streams:/streams
+
+  file-transcoder-vp8:
+    build:
+      context: ../rtmp-go/azure/file-transcoder
+      dockerfile: Dockerfile
+    profiles: ["transcode"]
+    environment:
+      CODEC: "vp8"
+      INTERNAL_API_KEY: "dev-internal-api-key-change-me"
+    volumes:
+      - ./uploads:/uploads:ro
+      - ./streams:/streams
+
+  file-transcoder-vp9:
+    build:
+      context: ../rtmp-go/azure/file-transcoder
+      dockerfile: Dockerfile
+    profiles: ["transcode"]
+    environment:
+      CODEC: "vp9"
+      INTERNAL_API_KEY: "dev-internal-api-key-change-me"
+    volumes:
+      - ./uploads:/uploads:ro
       - ./streams:/streams
 
 volumes:
