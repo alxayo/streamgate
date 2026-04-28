@@ -65,10 +65,10 @@ param adminSessionSecret string
 @description('Name of the existing HLS output file share (from rtmp-go deployment)')
 param hlsOutputShareName string = 'hls-output'
 
-@description('Public URL of the HLS server (set after DNS setup, defaults to ACA FQDN)')
+@description('Public URL of the HLS server (e.g., https://hls.example.com). When using custom domains, this MUST be set to the custom domain — the default ACA FQDN will not match. Also used as the HLS_SERVER_BASE_URL on the platform so the player connects to the correct host.')
 param hlsServerBaseUrl string = ''
 
-@description('CORS allowed origin for HLS server (the platform app domain)')
+@description('CORS allowed origin for HLS server (the platform app domain, e.g., https://watch.example.com). When using custom domains, set this to the platform custom domain.')
 param corsAllowedOrigin string = ''
 
 @description('IP address allowed to access the admin console (empty = no restriction)')
@@ -78,7 +78,7 @@ param adminAllowedIp string = ''
 @secure()
 param rtmpAuthToken string = ''
 
-@description('Platform app URL for HLS server revocation polling (set on second deploy pass)')
+@description('Platform app URL for callbacks and revocation polling (e.g., https://watch.example.com). When using custom domains, set this to the platform custom domain. Used by HLS server for revocation sync and by transcoders for progress callbacks.')
 param platformAppUrl string = ''
 
 @description('SAS token for read-only access to hls-content blob container (set on second deploy pass)')
@@ -471,6 +471,15 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'ADMIN_ALLOWED_IP'
               value: adminAllowedIp
+            }
+            // PLATFORM_APP_URL — the platform's own public URL, used by transcoder
+            // containers to send progress/completion callbacks. When using custom
+            // domains (e.g., https://watch.example.com), this MUST be set via the
+            // platformAppUrl parameter — otherwise transcoders can't reach the
+            // platform's callback endpoints.
+            {
+              name: 'PLATFORM_APP_URL'
+              value: !empty(platformAppUrl) ? platformAppUrl : 'https://${platformApp.properties.configuration.ingress.fqdn}'
             }
             // Azure Storage connection string — needed by the platform to upload
             // VOD source files to blob storage after the creator's upload completes.
