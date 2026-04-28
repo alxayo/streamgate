@@ -110,15 +110,26 @@ async function generateMasterPlaylistFromUpstream(
   const vodProbes: Array<Promise<{ codec: string; rendition: typeof ABR_RENDITIONS[0] } | null>> = [];
   for (const codec of VOD_CODECS) {
     for (const r of ABR_RENDITIONS) {
+      const probePath = `${codec}/${r.dir}/playlist.m3u8`;
       vodProbes.push(
-        upstreamProxy.fetch(eventId, `${codec}/${r.dir}/playlist.m3u8`)
-          .then(() => ({ codec, rendition: r }))
-          .catch(() => null),
+        upstreamProxy.fetch(eventId, probePath)
+          .then(() => {
+            console.log(`[dynamic-master] Found variant: ${probePath}`);
+            return { codec, rendition: r };
+          })
+          .catch((err: Error) => {
+            // Debug: log first probe failure per codec to help diagnose SAS/path issues
+            if (r.dir === 'stream_0') {
+              console.log(`[dynamic-master] Probe miss: ${probePath} (${err.message})`);
+            }
+            return null;
+          }),
       );
     }
   }
 
   const vodResults = (await Promise.all(vodProbes)).filter(Boolean) as Array<{ codec: string; rendition: typeof ABR_RENDITIONS[0] }>;
+  console.log(`[dynamic-master] VOD probe found ${vodResults.length} variants for event ${eventId}`);
 
   // Group by codec to keep variants organized in the playlist
   for (const codec of VOD_CODECS) {
