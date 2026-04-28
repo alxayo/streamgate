@@ -75,6 +75,16 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // =========================================================================
+  // SKIP UPLOAD ROUTES — these handle their own auth and need the raw body
+  // stream to pass through un-buffered. If middleware touches these routes,
+  // Next.js proxy-buffers the entire request body in memory, which would
+  // OOM the container for large video files (hundreds of MB to several GB).
+  // =========================================================================
+  if (/\/api\/(admin|creator)\/events\/[^/]+\/upload$/.test(pathname)) {
+    return NextResponse.next();
+  }
+
+  // =========================================================================
   // ADMIN ROUTE PROTECTION
   // =========================================================================
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {

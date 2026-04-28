@@ -17,8 +17,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { checkPermission } from '@/lib/require-permission';
 import { getSystemDefaults } from '@/lib/stream-config';
+import { streamMultipartToDisk } from '@/lib/stream-upload';
 import { ALLOWED_VIDEO_MIME_TYPES } from '@streaming/shared';
-import { mkdir, writeFile, unlink, rmdir } from 'fs/promises';
+import { unlink, rmdir } from 'fs/promises';
 import path from 'path';
 
 // Next.js 14+ dynamic route params are delivered as a Promise
@@ -133,62 +134,45 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     );
   }
 
-  // ── Step 6: Parse multipart form data ─────────────────────────────────
-  // Next.js supports request.formData() natively — no external middleware
-  // needed. We extract the single "file" field from the form data.
-  let formData: FormData;
+  // ── Step 6: Stream file to disk ─────────────────────────────────────
+  // Use the streaming multipart parser to pipe the file directly from the
+  // HTTP request to disk — never holding the full file in memory. This is
+  // essential: the container has limited RAM (e.g. 1 GB) and video files
+  // can be hundreds of MB or several GB.
+  const { maxUploadSizeBytes } = await getSystemDefaults();
+  const uploadDir = path.join(process.cwd(), 'uploads', event.id);
+
+  let streamResult;
   try {
-    formData = await request.formData();
-  } catch {
-    return NextResponse.json(
-      { error: 'Invalid multipart form data' },
-      { status: 400 },
+    streamResult = await streamMultipartToDisk(
+      request,
+      uploadDir,
+      'file',                              // form field name
+      Number(maxUploadSizeBytes),           // max file size in bytes
     );
-  }
-
-  const file = formData.get('file');
-
-  // The "file" field must be present and must be an actual File object
-  // (not a plain string, which formData.get can also return for text fields).
-  if (!file || !(file instanceof File)) {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Upload failed';
+    // Distinguish between validation errors and server errors
+    const isValidation = msg.includes('Missing') || msg.includes('exceeds') || msg.includes('multipart');
     return NextResponse.json(
-      { error: 'Missing "file" field in form data' },
-      { status: 400 },
+      { error: msg },
+      { status: isValidation ? 400 : 500 },
     );
   }
 
   // ── Step 7: Validate MIME type ────────────────────────────────────────
-  // We only accept specific video container formats. The MIME type comes
-  // from the browser's Content-Type for the file part.
-  if (!(ALLOWED_VIDEO_MIME_TYPES as readonly string[]).includes(file.type)) {
+  // busboy reports the MIME type from the Content-Type of the file part.
+  // We only accept specific video container formats.
+  if (!(ALLOWED_VIDEO_MIME_TYPES as readonly string[]).includes(streamResult.mimeType)) {
+    // Clean up the saved file since it's not an accepted type
+    try { await unlink(streamResult.filePath); } catch { /* best-effort cleanup */ }
     return NextResponse.json(
-      { error: `Unsupported file type: ${file.type}. Allowed: ${ALLOWED_VIDEO_MIME_TYPES.join(', ')}` },
+      { error: `Unsupported file type: ${streamResult.mimeType}. Allowed: ${ALLOWED_VIDEO_MIME_TYPES.join(', ')}` },
       { status: 400 },
     );
   }
 
-  // ── Step 8: Validate file size against system settings ────────────────
-  // The admin can configure the max upload size in System Settings.
-  // getSystemDefaults() reads (or bootstraps) the setting from the DB.
-  const { maxUploadSizeBytes } = await getSystemDefaults();
-
-  if (BigInt(file.size) > maxUploadSizeBytes) {
-    return NextResponse.json(
-      { error: `File too large. Maximum allowed size is ${maxUploadSizeBytes.toString()} bytes` },
-      { status: 400 },
-    );
-  }
-
-  // ── Step 9: Sanitize the filename ─────────────────────────────────────
-  // Strip path separators and restrict to safe characters to prevent
-  // directory traversal and filesystem issues. Only alphanumeric, hyphens,
-  // underscores, and dots are allowed. Anything else becomes an underscore.
-  const rawName = file.name || 'upload.mp4';
-  const sanitizedFileName = rawName
-    .replace(/[/\\]/g, '')                     // Remove path separators first
-    .replace(/[^a-zA-Z0-9._-]/g, '_');         // Replace unsafe chars with underscore
-
-  // ── Step 10: Delete previous upload if re-uploading ───────────────────
+  // ── Step 8: Delete previous upload if re-uploading ───────────────────
   // If there's an existing upload in READY or FAILED state, the admin is
   // re-uploading. We delete the old record to make room for the new one.
   // (The eventId column has a @unique constraint, so we must delete first.)
@@ -196,68 +180,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     await prisma.upload.delete({ where: { id: existingUpload.id } });
   }
 
-  // ── Step 11: Create the Upload record with UPLOADING status ───────────
-  // We create the DB record before writing the file so we can track that
-  // an upload is in progress. If the file write fails, we'll update the
-  // status to FAILED.
-  const blobPath = `uploads/${event.id}/${sanitizedFileName}`;
+  // ── Step 9: Create the Upload record ──────────────────────────────────
+  // File is now safely on disk. Create the DB record with UPLOADED status
+  // so the transcoder knows it's ready to be picked up.
+  const blobPath = `uploads/${event.id}/${streamResult.fileName}`;
   const upload = await prisma.upload.create({
     data: {
       eventId: event.id,
-      fileName: sanitizedFileName,
-      fileSize: BigInt(file.size),
-      mimeType: file.type,
+      fileName: streamResult.fileName,
+      fileSize: BigInt(streamResult.fileSize),
+      mimeType: streamResult.mimeType,
       blobPath,
-      status: 'UPLOADING',
+      status: 'UPLOADED',
     },
   });
 
-  // ── Step 12: Save the file to disk ────────────────────────────────────
-  // Create the directory if it doesn't exist (recursive: true creates any
-  // missing parent directories). Then read the file into a Buffer and
-  // write it to disk.
-  try {
-    const uploadDir = path.join(process.cwd(), 'uploads', event.id);
-    await mkdir(uploadDir, { recursive: true });
-
-    // Read the file contents into a Buffer and write to disk
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await writeFile(path.join(uploadDir, sanitizedFileName), buffer);
-  } catch (err) {
-    // If the file write fails, mark the upload as FAILED so the admin
-    // can retry. We don't leave it stuck in UPLOADING state.
-    await prisma.upload.update({
-      where: { id: upload.id },
-      data: {
-        status: 'FAILED',
-        errorMessage: err instanceof Error ? err.message : 'File write failed',
-      },
-    });
-    return NextResponse.json(
-      { error: 'Failed to save uploaded file' },
-      { status: 500 },
-    );
-  }
-
-  // ── Step 13: Update status to UPLOADED ────────────────────────────────
-  // The file is safely on disk. Update the record so downstream processes
-  // (e.g. the transcoder) know it's ready to be picked up.
-  await prisma.upload.update({
-    where: { id: upload.id },
-    data: { status: 'UPLOADED' },
-  });
-
-  // ── Step 14: Return 202 Accepted ──────────────────────────────────────
+  // ── Step 10: Return 202 Accepted ──────────────────────────────────────
   // 202 signals that the upload has been accepted for processing. The
   // admin UI can poll the GET endpoint for transcoding progress.
-  // BigInt fileSize must be converted to string for JSON serialisation.
   return NextResponse.json(
     {
       data: {
         uploadId: upload.id,
         status: 'UPLOADED',
-        fileName: sanitizedFileName,
-        fileSize: file.size.toString(),
+        fileName: streamResult.fileName,
+        fileSize: streamResult.fileSize.toString(),
       },
     },
     { status: 202 },
