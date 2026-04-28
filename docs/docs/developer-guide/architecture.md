@@ -63,6 +63,11 @@ StreamGate is a **ticket-gated video streaming platform** composed of two indepe
 | HLS Transcoder | Platform App | HTTP (REST) | Fetch stream config on `publish_start` via `GET /api/internal/events/:id/stream-config`; cache system defaults via `GET /api/internal/stream-config/defaults` |
 | Platform App | HLS Server | HTTP (HEAD) | Stream probing — check if a stream is live using a short-lived probe JWT |
 | Admin Browser | Platform App | HTTPS (REST) | Event/token CRUD via `/api/admin/*` with session cookie auth |
+| Admin Browser | Platform App | HTTPS (multipart) | VOD file upload — streamed to Azure Blob via `/api/admin/events/:id/upload` |
+| Platform App | Azure Container Apps | HTTPS (SDK) | Launch transcoder jobs via `@azure/arm-appcontainers` SDK |
+| Transcoder Jobs | Platform App | HTTPS (REST) | Progress callbacks (`POST /api/internal/transcode-progress`) and completion (`POST /api/internal/transcode-callback`) |
+| Transcoder Jobs | Azure Blob | HTTPS | Read source from `vod-uploads`, write HLS output to `hls-content` |
+| HLS Server | Azure Blob | HTTPS | Fetch VOD HLS content (master playlist, segments) from `hls-content` container |
 
 :::info Key Isolation Principle
 The HLS Media Server has **zero database access**. It verifies JWTs using only the shared HMAC secret (`PLAYBACK_SIGNING_SECRET`) and maintains an in-memory revocation cache updated by polling. This separation enables the HLS server to handle thousands of concurrent streaming requests with sub-millisecond auth overhead.
@@ -190,7 +195,8 @@ JWT verification is **5,000×** faster and requires no database connection. The 
 | Platform App | Next.js 14+ (TypeScript) | Viewer portal, admin console, API routes |
 | HLS Media Server | Express.js (TypeScript) | JWT-protected stream serving |
 | Shared Library | TypeScript (no build step) | Types, constants, utilities |
-| Database | Prisma ORM + SQLite (dev) / PostgreSQL (prod) | Event, token, session storage |
+| Transcoder | Alpine + FFmpeg (Docker) | Multi-codec VOD transcoding via Azure Container Apps Jobs |
+| Database | Prisma ORM + SQLite (dev) / PostgreSQL (prod) | Event, token, session, upload storage |
 | Video Player | hls.js | HLS playback with JWT injection |
 | UI Framework | React 18+ | Component-based UI |
 | Styling | Tailwind CSS + shadcn/ui | Design system |
@@ -199,3 +205,88 @@ JWT verification is **5,000×** faster and requires no database connection. The 
 | JWT Library | `jose` | JWT sign/verify (both services) |
 | Admin Auth | bcrypt + iron-session | Password hashing + encrypted cookies |
 | Token Generation | `crypto.randomBytes` | 12-char base62 codes (~71 bits entropy) |
+
+## VOD Upload & Transcoding Pipeline
+
+StreamGate supports pre-recorded video uploads in addition to live streaming. The VOD pipeline uses Azure Container Apps Jobs to transcode uploaded files into multi-codec, multi-bitrate HLS streams.
+
+### VOD Flow
+
+```
+Creator/Admin                Platform App              Azure Blob              Transcoder Jobs
+     │                           │                        │                        │
+     │  1. Upload video file     │                        │                        │
+     │  (streaming multipart)    │                        │                        │
+     │──────────────────────────▶│  2. Stream to blob     │                        │
+     │                           │───────────────────────▶│  vod-uploads/          │
+     │                           │                        │  {eventId}/{file}      │
+     │                           │  3. Create Upload +    │                        │
+     │                           │     TranscodeJob       │                        │
+     │                           │     records in DB      │                        │
+     │                           │                        │                        │
+     │                           │  4. Launch ACA Jobs    │                        │
+     │                           │  (one per codec)       │                        │
+     │                           │───────────────────────────────────────────────▶│
+     │                           │                        │                        │
+     │                           │                        │  5. FFmpeg reads from  │
+     │                           │                        │◀─── vod-uploads blob   │
+     │                           │                        │                        │
+     │                           │                        │  6. FFmpeg writes HLS  │
+     │                           │  hls-content/          │◀─── to hls-content     │
+     │                           │  {eventId}/{codec}/    │     blob container     │
+     │                           │  stream_N/playlist.m3u8│                        │
+     │                           │                        │                        │
+     │  7. Progress callbacks    │◀──────────────────────────────────────────────│
+     │  (UI shows % per codec)   │  POST /api/internal/   │                        │
+     │                           │  transcode-progress    │                        │
+     │                           │                        │                        │
+     │  8. Completion callback   │◀──────────────────────────────────────────────│
+     │                           │  POST /api/internal/   │                        │
+     │                           │  transcode-callback    │                        │
+     │                           │                        │                        │
+     │                           │  9. Update Upload      │                        │
+     │                           │  status → READY        │                        │
+```
+
+### Blob Storage Layout
+
+```
+Azure Storage Account
+├── vod-uploads/                    # Source video files
+│   └── uploads/{eventId}/{file}
+│
+└── hls-content/                    # Transcoded HLS output
+    └── {eventId}/
+        ├── h264/
+        │   ├── stream_0/           # 1080p rendition
+        │   │   ├── playlist.m3u8
+        │   │   ├── init.mp4
+        │   │   └── segment_0000.m4s ...
+        │   ├── stream_1/           # 720p rendition
+        │   └── stream_2/           # 480p rendition
+        ├── av1/
+        │   └── stream_0/ ...
+        └── vp9/
+            └── stream_0/ ...
+```
+
+### Dynamic Master Playlist
+
+When a viewer requests `/streams/{eventId}/master.m3u8`, the HLS server dynamically generates a master playlist by probing blob storage for available codecs and renditions:
+
+1. **Probe** — Check which codec directories exist: `h264/`, `av1/`, `vp9/`, `vp8/`
+2. **Discover** — For each codec, find `stream_N/playlist.m3u8` variants
+3. **Generate** — Build `#EXT-X-STREAM-INF` entries with correct bandwidth, resolution, and `CODECS` attributes
+4. **Serve** — Return the generated playlist (cached briefly)
+
+This means the master playlist automatically reflects whichever codecs have completed transcoding — no manual manifest management needed.
+
+### Transcoder Container
+
+The transcoder runs as an Alpine + FFmpeg Docker container (`transcoder/Dockerfile`) launched as Azure Container Apps Jobs. Key design decisions:
+
+- **Array-based FFmpeg invocation** — Arguments are stored in a bash array and expanded as `"${ARGS[@]}"` to avoid shell metacharacter issues (eval + `*` in `force_key_frames` caused glob expansion)
+- **VP8 uses MPEG-TS segments** — VP8 cannot be muxed into fragmented MP4 containers, so it uses `.ts` segments instead of `.m4s`
+- **AV1 uses SVT-AV1 VBR mode** — Rate control set via `-svtav1-params rc=1` (no `-maxrate` allowed in VBR mode)
+- **Progress reporting** — FFmpeg stderr is parsed for `time=` progress lines and sent to the platform via callbacks
+- **Unique image tags** — Container images use `v{timestamp}` tags (not `:latest`) because Azure Container Apps doesn't create new revisions for same-tag updates
