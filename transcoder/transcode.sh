@@ -226,12 +226,14 @@ for i in $(seq 0 $((num_renditions - 1))); do
       ;;
     av1)
       # AV1 via SVT-AV1 — best compression, slower encoding.
-      # SVT-AV1 requires explicit rate control mode when using target bitrate:
-      #   -svtav1-params rc=1 sets VBR (variable bitrate) mode.
-      #   Without this, SVT defaults to CRF-only (rc=0) and rejects -b:v.
+      # SVT-AV1 rate control modes:
+      #   rc=0 (default) = CRF (constant quality) — uses -crf, supports -maxrate
+      #   rc=1 = VBR (variable bitrate) — uses -b:v as target, does NOT support -maxrate
+      # We use VBR (rc=1) with a target bitrate. Do NOT pass -maxrate in VBR mode
+      # or SVT-AV1 will error: "Max Bitrate only supported with CRF mode".
       FFMPEG_ARGS+=(-map 0:v:0 -map 0:a:0?)
-      FFMPEG_ARGS+=(-c:v:${i} libsvtav1 -preset 6 -svtav1-params "rc=1")
-      FFMPEG_ARGS+=(-b:v:${i} "${vbitrate}" -maxrate:v:${i} "${vbitrate}")
+      FFMPEG_ARGS+=(-c:v:${i} libsvtav1 -preset 6 -svtav1-params rc=1)
+      FFMPEG_ARGS+=(-b:v:${i} "${vbitrate}")
       FFMPEG_ARGS+=(-s:v:${i} "${width}x${height}")
       FFMPEG_ARGS+=(-c:a:${i} libopus -b:a:${i} "${abitrate}")
       ;;
