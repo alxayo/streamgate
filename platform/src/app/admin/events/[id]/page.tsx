@@ -299,14 +299,15 @@ export default function EventDetailPage() {
       }
     };
 
-    // Handle completion — parse the response and update state
+    // Handle completion — parse the response and update state.
+    // The POST response has a different shape than UploadData (it includes
+    // transcodingLaunched/Failed counts, not the full upload object). So on
+    // success we fetch the real upload status from the GET endpoint instead
+    // of trying to use the POST response directly.
     xhr.onload = () => {
       setUploading(false);
       if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          if (data.data) setUploadData(data.data);
-        } catch { /* ignore parse errors */ }
+        fetchUploadStatus();
         setVodFile(null);
         // Reset file input so the same file can be re-selected if needed
         if (fileInputRef.current) fileInputRef.current.value = '';

@@ -499,6 +499,12 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'AZURE_RESOURCE_GROUP'
               value: resourceGroup().name
             }
+            // Managed identity client ID — needed by DefaultAzureCredential to
+            // authenticate with user-assigned identity (for starting ACA Jobs).
+            {
+              name: 'AZURE_MANAGED_IDENTITY_CLIENT_ID'
+              value: identityClientId
+            }
             // Transcoder image refs — the launcher uses these to override the
             // container image in each job execution's template.
             ...(!empty(transcoderImageH264) ? [

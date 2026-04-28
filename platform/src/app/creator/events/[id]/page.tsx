@@ -186,10 +186,9 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
     xhr.onload = () => {
       setUploading(false);
       if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          if (data.data) setUploadData(data.data);
-        } catch { /* ignore parse errors */ }
+        // POST response shape differs from UploadData — fetch the real
+        // upload status from the GET endpoint to populate state correctly.
+        fetchUploadStatus();
         setVodFile(null);
         // Reset file input so the same file can be re-selected if needed
         if (fileInputRef.current) fileInputRef.current.value = '';

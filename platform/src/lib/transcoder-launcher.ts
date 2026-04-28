@@ -214,7 +214,13 @@ async function launchContainerAppsJob(config: TranscodeJobConfig): Promise<Launc
     //   1. Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET)
     //   2. Managed Identity (when running in Azure)
     //   3. Azure CLI credentials (for local dev with `az login`)
-    const credential = new DefaultAzureCredential();
+    // For user-assigned managed identities (common in Container Apps), we must
+    // pass the managedIdentityClientId — otherwise it tries system-assigned
+    // identity and fails with "Unable to load the proper Managed Identity".
+    const managedIdentityClientId = process.env.AZURE_MANAGED_IDENTITY_CLIENT_ID;
+    const credential = new DefaultAzureCredential(
+      managedIdentityClientId ? { managedIdentityClientId } : undefined,
+    );
     const client = new ContainerAppsAPIClient(credential, subscriptionId);
 
     const image = getTranscoderImage(config.codec as CodecName);
@@ -435,8 +441,11 @@ export async function stopJobExecution(
     // @ts-ignore — module may not be installed
     const { DefaultAzureCredential } = await import('@azure/identity');
 
+    const managedIdentityClientId = process.env.AZURE_MANAGED_IDENTITY_CLIENT_ID;
     const client = new ContainerAppsAPIClient(
-      new DefaultAzureCredential(),
+      new DefaultAzureCredential(
+        managedIdentityClientId ? { managedIdentityClientId } : undefined,
+      ),
       subscriptionId,
     );
 
