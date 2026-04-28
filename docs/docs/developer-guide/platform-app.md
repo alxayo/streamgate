@@ -17,7 +17,7 @@ The Platform App is a **Next.js 14+** application serving four roles:
 ```
 platform/
 ├── prisma/
-│   └── schema.prisma          # Database schema (Event, Token, ActiveSession, SystemSettings, AdminUser, RecoveryCode, AuditLog, Creator, Channel)
+│   └── schema.prisma          # Database schema (Event, Token, ActiveSession, SystemSettings, AdminUser, RecoveryCode, AuditLog, Creator, Channel, Upload, TranscodeJob)
 ├── src/
 │   ├── app/                   # Next.js App Router
 │   │   ├── page.tsx           # Viewer Portal entry page
@@ -82,7 +82,13 @@ platform/
 │   │   ├── require-permission.ts # API route permission guard
 │   │   ├── totp-crypto.ts    # AES-256-GCM encrypt/decrypt for TOTP secrets
 │   │   ├── admin-seed.ts     # First-boot super_admin seeding
-│   │   └── env.ts            # Environment variable accessors
+│   │   ├── env.ts            # Environment variable accessors
+│   │   ├── blob-upload.ts    # Streaming upload to Azure Blob Storage
+│   │   ├── stream-upload.ts  # Multipart form parsing + blob streaming
+│   │   ├── transcoder-launcher.ts # Launches Azure Container Apps Jobs per codec
+│   │   ├── trigger-transcode.ts   # Orchestrates upload → transcode workflow
+│   │   ├── transcode-staleness.ts # Detects and cleans up crashed transcoder jobs
+│   │   └── master-playlist-generator.ts # Generates event-level multi-codec master.m3u8
 │   └── generated/prisma/      # Prisma client (auto-generated)
 ├── package.json
 └── tsconfig.json
@@ -166,6 +172,8 @@ All admin endpoints require an `iron-session` cookie set after completing two-fa
 | `GET` | `/api/admin/dashboard` | Dashboard statistics |
 | `GET` | `/api/admin/settings` | Get system-wide stream defaults |
 | `PUT` | `/api/admin/settings` | Update system-wide stream defaults |
+| `POST` | `/api/admin/events/:id/upload` | Upload a VOD video file (streaming multipart to Azure Blob) |
+| `POST` | `/api/admin/events/:id/retranscode` | Re-trigger transcoding for an uploaded video |
 
 ### Internal Endpoints
 
@@ -174,6 +182,8 @@ All admin endpoints require an `iron-session` cookie set after completing two-fa
 | `GET` | `/api/revocations?since=` | `X-Internal-Api-Key` header | Returns revocations and event deactivations since timestamp |
 | `GET` | `/api/internal/stream-config/defaults` | `X-Internal-Api-Key` header | Returns system-wide transcoder and player defaults |
 | `GET` | `/api/internal/events/:id/stream-config` | `X-Internal-Api-Key` header | Returns merged per-event transcoder + player config |
+| `POST` | `/api/internal/transcode-progress` | `X-Internal-Api-Key` header | Receives FFmpeg progress updates from transcoder containers |
+| `POST` | `/api/internal/transcode-callback` | `X-Internal-Api-Key` header | Receives transcoding completion/failure from transcoder containers |
 
 ### RTMP Callback
 
