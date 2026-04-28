@@ -18,10 +18,13 @@ const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
   allowedDevOrigins: getLanOrigins(),
-  // Allow large video file uploads (up to 6 GB) for VOD transcoding.
-  // Without this, Next.js buffers only the first 10 MB and formData() parsing
-  // fails with "Invalid multipart form data" for anything larger.
-  proxyClientMaxBodySize: '6gb',
+  experimental: {
+    // Allow large video file uploads (up to 6 GB) for VOD transcoding.
+    // Without this, Next.js buffers only the first 10 MB and formData() parsing
+    // fails with "Invalid multipart form data" for anything larger.
+    // Value is in bytes: 6 * 1024^3 = 6,442,450,944
+    proxyClientMaxBodySize: 6 * 1024 * 1024 * 1024,
+  },
 };
 
 export default nextConfig;
