@@ -364,3 +364,57 @@ This endpoint clears cached segments for a specific event. Useful when:
 :::note
 This endpoint is not protected by JWT — it should be restricted via network policy or reverse proxy rules in production.
 :::
+
+## VOD Content Serving
+
+For VOD events (uploaded + transcoded videos), the HLS server serves content from Azure Blob Storage via its upstream proxy mode. The blob container `hls-content` stores the transcoded HLS output.
+
+### Dynamic Master Playlist Generation
+
+When a viewer requests `master.m3u8` for a VOD event, the HLS server dynamically generates a multi-codec master playlist:
+
+```
+GET /streams/:eventId/master.m3u8
+Authorization: Bearer <JWT>
+        │
+        ▼
+┌────────────────────────────────┐
+│ 1. Check local disk            │ ← Not found (VOD lives in blob)
+│ 2. Check blob for codecs:      │
+│    - h264/stream_0/playlist    │
+│    - av1/stream_0/playlist     │
+│    - vp9/stream_0/playlist     │
+│    - vp8/stream_0/playlist     │
+│ 3. Parse each playlist for     │
+│    BANDWIDTH + RESOLUTION      │
+│ 4. Generate master.m3u8 with   │
+│    #EXT-X-STREAM-INF entries   │
+└────────────────────────────────┘
+```
+
+The generation function (`generateMasterPlaylistFromUpstream` in `routes/streams.ts`) probes blob storage in parallel for all supported codecs, discovers available renditions, and builds the appropriate `#EXT-X-STREAM-INF` entries with `CODECS` attributes.
+
+### Codec-to-CODECS Mapping
+
+| Codec | HLS CODECS attribute | Segment format |
+|-------|---------------------|----------------|
+| H.264 | `avc1.640028,mp4a.40.2` | fragmented MP4 (`.m4s`) |
+| AV1 | `av01.0.08M.08,mp4a.40.2` | fragmented MP4 (`.m4s`) |
+| VP9 | `vp09.00.31.08,mp4a.40.2` | fragmented MP4 (`.m4s`) |
+| VP8 | `vp8,mp4a.40.2` | MPEG-TS (`.ts`) |
+
+### VOD Segment Request Flow
+
+After the master playlist directs the player to a specific codec/rendition:
+
+```
+GET /streams/:eventId/h264/stream_0/playlist.m3u8
+GET /streams/:eventId/h264/stream_0/init.mp4
+GET /streams/:eventId/h264/stream_0/segment_0001.m4s
+```
+
+These are served via the standard upstream proxy path, fetching from `hls-content/{eventId}/h264/stream_0/...` in blob storage.
+
+:::tip Caching
+VOD segments are immutable (unlike live segments that update every few seconds), so they are aggressively cached by the segment cache. This means the first viewer pays the blob fetch latency, but subsequent viewers get local-speed delivery.
+:::
