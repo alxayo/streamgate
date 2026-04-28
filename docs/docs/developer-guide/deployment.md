@@ -272,6 +272,103 @@ curl -sf http://localhost:4000/health || echo "HLS server unhealthy"
 For detailed Azure deployment architectures with scale-to-zero, CDN caching, and cost estimates for 10 to 10,000+ concurrent viewers, see the [Cloud Architecture (Azure)](./cloud-architecture/README.md) guide.
 :::
 
+### VOD Transcoder Deployment (Azure)
+
+The VOD transcoding pipeline requires Azure Container Apps Jobs. Each codec runs as a separate job definition, all using the same Docker image but invoked with different environment variable overrides.
+
+#### Building the Transcoder Image
+
+```bash
+cd transcoder
+
+# Build with a unique timestamp tag (required — Azure won't create new
+# revisions for the same tag like :latest)
+IMAGE_TAG="v$(date +%s)"
+ACR_NAME="myacr"
+
+az acr build \
+  --registry $ACR_NAME \
+  --image transcoder:$IMAGE_TAG \
+  --file Dockerfile .
+```
+
+#### Creating Transcoder Jobs
+
+Create one Container Apps Job per codec. All share the same image, secrets, and timeout:
+
+```bash
+# Required for all jobs:
+RESOURCE_GROUP="rg-streamgate"
+ENVIRONMENT="my-aca-environment"
+ACR_SERVER="myacr.azurecr.io"
+IMAGE="$ACR_SERVER/transcoder:$IMAGE_TAG"
+
+# Create the H.264 transcoder job
+az containerapp job create \
+  --name sg-transcode-h264 \
+  --resource-group $RESOURCE_GROUP \
+  --environment $ENVIRONMENT \
+  --trigger-type Manual \
+  --replica-timeout 7200 \
+  --replica-retry-limit 1 \
+  --cpu 4 --memory 8Gi \
+  --image $IMAGE \
+  --secrets \
+    azure-storage-conn="<connection-string>" \
+    internal-api-key="<api-key>" \
+  --env-vars \
+    CODEC=h264 \
+    AZURE_STORAGE_CONNECTION_STRING=secretref:azure-storage-conn \
+    INTERNAL_API_KEY=secretref:internal-api-key
+
+# Repeat for av1, vp9, vp8 (changing --name and CODEC)
+```
+
+:::warning Image tags
+Azure Container Apps does **NOT** create new revisions when you update with the same image tag (e.g., `:latest`). Always use unique tags like `v{timestamp}` for each build. This was a major source of deployment confusion during initial setup.
+:::
+
+#### Required Platform Environment Variables
+
+The Platform App needs these to launch transcoder jobs:
+
+```bash
+AZURE_SUBSCRIPTION_ID=<subscription-id>
+AZURE_RESOURCE_GROUP=<resource-group>
+AZURE_MANAGED_IDENTITY_CLIENT_ID=<client-id>
+TRANSCODER_IMAGE_H264=myacr.azurecr.io/transcoder:v1234
+TRANSCODER_IMAGE_AV1=myacr.azurecr.io/transcoder:v1234
+TRANSCODER_IMAGE_VP9=myacr.azurecr.io/transcoder:v1234
+TRANSCODER_IMAGE_VP8=myacr.azurecr.io/transcoder:v1234
+PLATFORM_APP_URL=https://watch.example.com  # For transcoder callbacks
+```
+
+#### Blob Storage Setup
+
+Create two blob containers in your Azure Storage Account:
+
+| Container | Purpose | Access |
+|-----------|---------|--------|
+| `vod-uploads` | Source video files | Platform writes, transcoder reads |
+| `hls-content` | Transcoded HLS output | Transcoder writes, HLS server reads |
+
+#### Custom Domain Gotchas
+
+When using custom domains with Azure Container Apps:
+
+1. **`HLS_SERVER_BASE_URL`** — Must be set to the custom domain (e.g., `https://hls.example.com`), not the auto-generated ACA FQDN. The Bicep template defaults to the FQDN, which breaks playback if a custom domain is configured.
+
+2. **`PLATFORM_APP_URL`** — Must be set on **both** the HLS server (for revocation polling) **and** the platform itself (for transcoder callbacks). The Bicep template now includes this on both services.
+
+3. **`CORS_ALLOWED_ORIGIN`** — Must match the custom domain viewers use (e.g., `https://watch.example.com`), not the ACA FQDN.
+
+:::danger Custom domain checklist
+After setting up custom domains, verify these three URLs all use the custom domain, not the `.azurecontainerapps.io` FQDN:
+- `HLS_SERVER_BASE_URL` on platform → `https://hls.example.com`
+- `PLATFORM_APP_URL` on platform → `https://watch.example.com`
+- `CORS_ALLOWED_ORIGIN` on HLS server → `https://watch.example.com`
+:::
+
 ### Platform App
 
 - **Horizontal scaling**: Deploy multiple instances behind a load balancer
@@ -322,6 +419,17 @@ These must match between Platform App and HLS Server:
 | `NEXT_PUBLIC_APP_NAME` | No | `"StreamGate"` | Application name shown in UI |
 | `SESSION_TIMEOUT_SECONDS` | No | `60` | Seconds before inactive session is considered abandoned |
 | `ADMIN_PASSWORD_HASH_FILE` | No | — | Alternative: read admin hash from a file (for Docker secrets) |
+| `AZURE_STORAGE_CONNECTION_STRING` | No* | — | Azure Storage connection string (required for VOD uploads) |
+| `AZURE_SUBSCRIPTION_ID` | No* | — | Subscription ID for launching transcoder jobs |
+| `AZURE_RESOURCE_GROUP` | No* | — | Resource group for transcoder Container Apps Jobs |
+| `AZURE_MANAGED_IDENTITY_CLIENT_ID` | No* | — | Managed identity for authenticating transcoder job launches |
+| `TRANSCODER_IMAGE_H264` | No* | — | ACR image for H.264 transcoder |
+| `TRANSCODER_IMAGE_AV1` | No* | — | ACR image for AV1 transcoder |
+| `TRANSCODER_IMAGE_VP9` | No* | — | ACR image for VP9 transcoder |
+| `TRANSCODER_IMAGE_VP8` | No* | — | ACR image for VP8 transcoder |
+| `PLATFORM_APP_URL` | No* | — | Platform's own URL (for transcoder callbacks) |
+
+\*\* Required only when VOD upload/transcoding is enabled (Azure deployment).
 
 ### HLS Server Variables
 
