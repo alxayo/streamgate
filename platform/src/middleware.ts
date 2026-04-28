@@ -166,6 +166,16 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/admin/:path*', '/creator/:path*', '/api/creator/:path*'],
+  matcher: [
+    '/admin/:path*',
+    '/creator/:path*',
+    // Match admin/creator API routes EXCEPT upload routes.
+    // Upload routes must be completely excluded from middleware — even
+    // returning NextResponse.next() causes Next.js to proxy-buffer the
+    // request body, which truncates large file uploads ("Unexpected end
+    // of form") or OOMs the container.
+    '/api/admin/((?!events/[^/]+/upload).*)',
+    '/api/creator/((?!events/[^/]+/upload).*)',
+  ],
 };
 
