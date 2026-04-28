@@ -9,6 +9,8 @@ import type { UpstreamProxy } from '../services/upstream-proxy.js';
 import type { SegmentCache } from '../services/segment-cache.js';
 import type { InflightDeduplicator } from '../services/inflight-dedup.js';
 import type { ServerConfig } from '../config.js';
+import { CODEC_HLS_STRINGS } from '@streaming/shared';
+import type { CodecName } from '@streaming/shared';
 
 // .m4s files are fragmented MP4 (fMP4/CMAF) segments used by modern HLS.
 // Multi-codec VOD transcoding (AV1, VP8, VP9) produces .m4s segments
@@ -24,6 +26,21 @@ const MIME_TYPES: Record<string, string> = {
 
 const ALLOWED_EXTENSIONS = new Set(['.m3u8', '.ts', '.fmp4', '.mp4', '.m4s']);
 
+/**
+ * Maps a resolution string (e.g., "1920x1080") to the label used in
+ * CODEC_HLS_STRINGS (e.g., "1080p"). Falls back to "default" when
+ * the resolution doesn't match a known label.
+ */
+function resolutionToLabel(resolution: string): string {
+  const height = resolution.split('x')[1];
+  switch (height) {
+    case '1080': return '1080p';
+    case '720': return '720p';
+    case '480': return '480p';
+    default: return 'default';
+  }
+}
+
 // ABR rendition definitions matching the transcoder's output.
 // Used for live streaming where there are no codec subdirectories.
 const ABR_RENDITIONS = [
@@ -34,7 +51,10 @@ const ABR_RENDITIONS = [
 
 // Codecs that VOD transcoding can produce. Each gets its own subdirectory
 // under the event folder in blob storage (e.g., {eventId}/h264/stream_0/).
-const VOD_CODECS = ['h264', 'av1', 'vp9', 'vp8'];
+// ORDER MATTERS: hls.js picks the first compatible codec group at startup
+// and stays with it. Placing the most efficient codecs first ensures the
+// player uses AV1 (40% less bandwidth than H.264) when the device supports it.
+const VOD_CODECS: CodecName[] = ['av1', 'vp9', 'h264', 'vp8'];
 
 /**
  * Generate a master.m3u8 dynamically by checking which variant stream
@@ -131,11 +151,22 @@ async function generateMasterPlaylistFromUpstream(
   const vodResults = (await Promise.all(vodProbes)).filter(Boolean) as Array<{ codec: string; rendition: typeof ABR_RENDITIONS[0] }>;
   console.log(`[dynamic-master] VOD probe found ${vodResults.length} variants for event ${eventId}`);
 
-  // Group by codec to keep variants organized in the playlist
+  // Group by codec to keep variants organized in the playlist.
+  // hls.js reads the CODECS attribute to filter unsupported codecs and
+  // locks onto the first compatible codec group (hence the ordering above).
   for (const codec of VOD_CODECS) {
     const codecVariants = vodResults.filter((v) => v.codec === codec);
     for (const v of codecVariants) {
-      lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${v.rendition.bandwidth},RESOLUTION=${v.rendition.resolution}`);
+      // Look up the RFC 6381 codec strings so hls.js knows what decoder is
+      // needed. Without CODECS, hls.js can't distinguish H.264 from AV1 and
+      // may pick a variant the browser can't decode.
+      const hlsStrings = CODEC_HLS_STRINGS[v.codec as CodecName];
+      const resolutionLabel = resolutionToLabel(v.rendition.resolution);
+      const videoCodec = hlsStrings?.video[resolutionLabel] ?? hlsStrings?.video['default'] ?? 'unknown';
+      const audioCodec = hlsStrings?.audio ?? 'mp4a.40.2';
+      const codecsAttr = `${videoCodec},${audioCodec}`;
+
+      lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${v.rendition.bandwidth},RESOLUTION=${v.rendition.resolution},CODECS="${codecsAttr}"`);
       lines.push(`${v.codec}/${v.rendition.dir}/playlist.m3u8`);
       found++;
     }
