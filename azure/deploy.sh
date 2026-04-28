@@ -221,6 +221,23 @@ az acr build \
   "$STREAMGATE_ROOT" \
   --no-logs --output none
 
+# Build the VOD transcoder image if the transcoder/ directory exists.
+# This image contains FFmpeg + Azure CLI and is used by Container Apps Jobs
+# to transcode uploaded VOD files into HLS streams.
+if [ -d "$STREAMGATE_ROOT/transcoder" ]; then
+  echo "    Building streamgate-transcoder..."
+  az acr build \
+    --registry "$ACR_NAME" \
+    --image "streamgate-transcoder:${IMAGE_TAG}" \
+    --file "$STREAMGATE_ROOT/transcoder/Dockerfile" \
+    "$STREAMGATE_ROOT/transcoder" \
+    --no-logs --output none
+  TRANSCODER_IMAGE="${REGISTRY_LOGIN_SERVER}/streamgate-transcoder:${IMAGE_TAG}"
+  echo "    Transcoder image: $TRANSCODER_IMAGE"
+else
+  TRANSCODER_IMAGE=""
+fi
+
 echo "    Images built and pushed."
 
 # --- Step 6: Redeploy Bicep with real images + resolved URLs ---
@@ -300,6 +317,15 @@ UPSTREAM_ADMIN_SAS_TOKEN=$(az storage container generate-sas \
   -o tsv)
 echo "    Admin SAS token generated (expires in 1 year)."
 
+# Retrieve the storage account connection string for the platform app and
+# transcoder jobs (used to upload VOD source files and transcoded HLS output).
+echo "    Retrieving storage account connection string..."
+AZURE_STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$STORAGE_ACCOUNT" \
+  --query 'connectionString' -o tsv)
+echo "    Storage connection string retrieved."
+
 DEPLOY_OUTPUT=$(az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
   --name "streamgate" \
@@ -323,6 +349,8 @@ DEPLOY_OUTPUT=$(az deployment group create \
     upstreamSasToken="$UPSTREAM_SAS_TOKEN" \
     upstreamAdminSasToken="$UPSTREAM_ADMIN_SAS_TOKEN" \
     adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
+    azureStorageConnectionString="$AZURE_STORAGE_CONNECTION_STRING" \
+    transcoderImageH264="${TRANSCODER_IMAGE:-}" \
   --query 'properties.outputs' \
   --output json)
 
