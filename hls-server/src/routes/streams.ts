@@ -24,17 +24,26 @@ const MIME_TYPES: Record<string, string> = {
 
 const ALLOWED_EXTENSIONS = new Set(['.m3u8', '.ts', '.fmp4', '.mp4', '.m4s']);
 
-// ABR rendition definitions matching the transcoder's output
+// ABR rendition definitions matching the transcoder's output.
+// Used for live streaming where there are no codec subdirectories.
 const ABR_RENDITIONS = [
   { dir: 'stream_0', bandwidth: 5192000, resolution: '1920x1080' },
   { dir: 'stream_1', bandwidth: 2628000, resolution: '1280x720' },
   { dir: 'stream_2', bandwidth: 1096000, resolution: '854x480' },
 ];
 
+// Codecs that VOD transcoding can produce. Each gets its own subdirectory
+// under the event folder in blob storage (e.g., {eventId}/h264/stream_0/).
+const VOD_CODECS = ['h264', 'av1', 'vp9', 'vp8'];
+
 /**
  * Generate a master.m3u8 dynamically by checking which variant stream
  * directories actually exist on disk. This provides a fallback when
  * the transcoder's master.m3u8 doesn't persist on Azure Files SMB.
+ *
+ * Handles two directory structures:
+ *   - Live streaming: {eventId}/stream_0/index.m3u8 (flat, no codec dirs)
+ *   - VOD transcoded: {eventId}/{codec}/stream_0/playlist.m3u8 (nested under codec)
  */
 async function generateMasterPlaylist(
   streamRoot: string,
@@ -42,17 +51,34 @@ async function generateMasterPlaylist(
   eventId: string,
 ): Promise<string | null> {
   const eventDir = path.join(streamRoot, streamKeyPrefix + eventId);
-  const lines: string[] = ['#EXTM3U', '#EXT-X-VERSION:3'];
+  const lines: string[] = ['#EXTM3U', '#EXT-X-VERSION:7'];
   let found = 0;
 
-  for (const r of ABR_RENDITIONS) {
-    try {
-      await fsPromises.access(path.join(eventDir, r.dir, 'index.m3u8'));
-      lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.resolution}`);
-      lines.push(`${r.dir}/index.m3u8`);
-      found++;
-    } catch {
-      // Variant not available yet
+  // First, try multi-codec VOD structure: {eventId}/{codec}/stream_N/playlist.m3u8
+  for (const codec of VOD_CODECS) {
+    for (const r of ABR_RENDITIONS) {
+      try {
+        await fsPromises.access(path.join(eventDir, codec, r.dir, 'playlist.m3u8'));
+        lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.resolution}`);
+        lines.push(`${codec}/${r.dir}/playlist.m3u8`);
+        found++;
+      } catch {
+        // Variant not available
+      }
+    }
+  }
+
+  // Fallback: try flat live streaming structure: {eventId}/stream_N/index.m3u8
+  if (found === 0) {
+    for (const r of ABR_RENDITIONS) {
+      try {
+        await fsPromises.access(path.join(eventDir, r.dir, 'index.m3u8'));
+        lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.resolution}`);
+        lines.push(`${r.dir}/index.m3u8`);
+        found++;
+      } catch {
+        // Variant not available
+      }
     }
   }
 
@@ -61,32 +87,67 @@ async function generateMasterPlaylist(
 }
 
 /**
- * Generate a master.m3u8 dynamically by probing the upstream origin for
- * variant playlists. Used in proxy/blob-only mode where there is no local
+ * Generate a master.m3u8 dynamically by probing the upstream origin (blob storage)
+ * for variant playlists. Used in proxy/blob-only mode where there is no local
  * filesystem to check.
+ *
+ * Handles two directory structures:
+ *   - Live streaming: {eventId}/stream_0/index.m3u8 (flat, no codec dirs)
+ *   - VOD transcoded: {eventId}/{codec}/stream_0/playlist.m3u8 (nested under codec)
+ *
+ * Probes all codec/rendition combinations in parallel for speed — blob storage
+ * returns 404 quickly for missing files, so parallel probing is efficient.
  */
 async function generateMasterPlaylistFromUpstream(
   upstreamProxy: UpstreamProxy,
   eventId: string,
 ): Promise<string | null> {
-  const lines: string[] = ['#EXTM3U', '#EXT-X-VERSION:3'];
+  const lines: string[] = ['#EXTM3U', '#EXT-X-VERSION:7'];
   let found = 0;
 
-  const probes = ABR_RENDITIONS.map(async (r) => {
-    try {
-      await upstreamProxy.fetch(eventId, `${r.dir}/index.m3u8`);
-      return r;
-    } catch {
-      return null;
+  // First, try multi-codec VOD structure: {codec}/stream_N/playlist.m3u8
+  // Build all probe requests in parallel for speed
+  const vodProbes: Array<Promise<{ codec: string; rendition: typeof ABR_RENDITIONS[0] } | null>> = [];
+  for (const codec of VOD_CODECS) {
+    for (const r of ABR_RENDITIONS) {
+      vodProbes.push(
+        upstreamProxy.fetch(eventId, `${codec}/${r.dir}/playlist.m3u8`)
+          .then(() => ({ codec, rendition: r }))
+          .catch(() => null),
+      );
     }
-  });
+  }
 
-  const results = await Promise.all(probes);
-  for (const r of results) {
-    if (r) {
-      lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.resolution}`);
-      lines.push(`${r.dir}/index.m3u8`);
+  const vodResults = (await Promise.all(vodProbes)).filter(Boolean) as Array<{ codec: string; rendition: typeof ABR_RENDITIONS[0] }>;
+
+  // Group by codec to keep variants organized in the playlist
+  for (const codec of VOD_CODECS) {
+    const codecVariants = vodResults.filter((v) => v.codec === codec);
+    for (const v of codecVariants) {
+      lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${v.rendition.bandwidth},RESOLUTION=${v.rendition.resolution}`);
+      lines.push(`${v.codec}/${v.rendition.dir}/playlist.m3u8`);
       found++;
+    }
+  }
+
+  // Fallback: try flat live streaming structure: stream_N/index.m3u8
+  if (found === 0) {
+    const liveProbes = ABR_RENDITIONS.map(async (r) => {
+      try {
+        await upstreamProxy.fetch(eventId, `${r.dir}/index.m3u8`);
+        return r;
+      } catch {
+        return null;
+      }
+    });
+
+    const liveResults = await Promise.all(liveProbes);
+    for (const r of liveResults) {
+      if (r) {
+        lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.resolution}`);
+        lines.push(`${r.dir}/index.m3u8`);
+        found++;
+      }
     }
   }
 
@@ -192,9 +253,12 @@ export function createStreamRoutes(
         }
       }
 
-      // 1c. Dynamic master.m3u8 from upstream — in proxy/blob-only mode,
-      // probe the upstream for variant playlists and synthesize master.m3u8.
-      if (filename === 'master.m3u8' && !config.streamRoot && upstreamProxy) {
+      // 1c. Dynamic master.m3u8 from upstream — probe blob storage for variant
+      // playlists and synthesize a master.m3u8. This handles both:
+      //   - Proxy-only mode (no STREAM_ROOT set)
+      //   - VOD content that lives only in blob (not on local filesystem)
+      // We try this whenever upstream is available and we haven't found a master yet.
+      if (filename === 'master.m3u8' && upstreamProxy) {
         const generated = await generateMasterPlaylistFromUpstream(upstreamProxy, eventId);
         if (generated) {
           console.log(`[dynamic-master] Generated master.m3u8 for event ${eventId} from upstream (proxy mode)`);
