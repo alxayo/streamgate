@@ -3,10 +3,10 @@
  * ===================================
  * POST /api/internal/transcode-callback
  *
- * Called by each ephemeral transcoder container (ACI) when it finishes
- * transcoding a video for one specific codec. Each codec container calls
- * this independently — so for an upload with 3 codecs enabled, this
- * endpoint will be called 3 times (once per codec).
+ * Called by each Container Apps Job execution when it finishes transcoding
+ * a video for one specific codec. Each codec job calls this independently —
+ * so for an upload with 3 codecs enabled, this endpoint will be called
+ * 3 times (once per codec).
  *
  * Auth: X-Internal-Api-Key header (service-to-service, not browser)
  *
@@ -16,6 +16,9 @@
  *   3. If all done and all succeeded → sets Upload status to READY
  *   4. If all done and any failed → sets Upload status to FAILED
  *   5. If some still running → does nothing (waits for remaining callbacks)
+ *
+ * Note: No container cleanup needed — Azure Container Apps Jobs automatically
+ * manages completed execution lifecycle (unlike raw ACI container groups).
  *
  * Request body (TranscodeCallbackPayload from @streaming/shared):
  *   { jobId, codec, status: 'completed'|'failed', error?, duration?, variants? }

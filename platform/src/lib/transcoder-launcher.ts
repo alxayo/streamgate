@@ -1,36 +1,38 @@
 /**
- * Transcoder Launcher — Ephemeral Container Management
- * =====================================================
- * This module manages the lifecycle of ephemeral transcoding containers.
- * When a creator uploads a video, we need to transcode it into HLS streams
- * for each enabled codec (H.264, AV1, VP8, VP9).
+ * Transcoder Launcher — Azure Container Apps Jobs
+ * =================================================
+ * This module starts VOD transcoding jobs using Azure Container Apps Jobs.
+ * When a creator uploads a video, we transcode it into HLS streams for
+ * each enabled codec (H.264, AV1, VP8, VP9).
  *
  * Architecture:
- *   - Each codec gets its own container (they run in parallel)
- *   - Containers are ephemeral: start → transcode → callback → exit → delete
- *   - In production: Azure Container Instances (ACI) via @azure/arm-containerinstance
- *   - In development: docker run (local containers) or mock/skip
+ *   - Each codec has a pre-created Container Apps Job definition in Azure
+ *     (deployed via Bicep: sg-transcode-h264, sg-transcode-av1, etc.)
+ *   - The job definitions live inside the same Container Apps Environment
+ *     as the platform app and HLS server — sharing networking and logging
+ *   - To transcode, we "start an execution" of the appropriate job,
+ *     passing per-upload environment variables as template overrides
+ *   - Azure manages the execution lifecycle: timeout, retry, cleanup
  *
- * What is ACI?
- *   Azure Container Instances is a serverless container service. You give it a
- *   Docker image + config and Azure runs it without you managing any VMs or
- *   clusters. Perfect for short-lived jobs like transcoding: you pay only for
- *   the seconds the container runs, and it cleans up automatically.
+ * What are Container Apps Jobs?
+ *   Container Apps Jobs are purpose-built for short-lived tasks. Unlike
+ *   Container Apps (which run continuously), Jobs run once and exit.
+ *   The "Manual" trigger type means we start them on demand via the SDK.
+ *   Azure automatically cleans up completed executions — no manual
+ *   container deletion needed (unlike raw ACI container groups).
  *
- * Why ephemeral?
- *   Transcoding is a one-shot job: read the source video, produce HLS segments,
- *   upload them to blob storage, report success, and exit. There's no reason to
- *   keep the container running afterward. Ephemeral containers are cheaper and
- *   simpler than maintaining a long-running transcoding service.
- *
- * The launcher doesn't know about FFmpeg or HLS — it just starts containers
- * with the right environment variables and the transcoder image does the rest.
+ * Why Container Apps Jobs instead of ACI?
+ *   - Same environment as platform + HLS → shared networking, secrets, logs
+ *   - Built-in timeout (replicaTimeout) replaces manual cleanup cron
+ *   - Built-in retry (replicaRetryLimit) for transient failures
+ *   - Automatic execution history and cleanup
+ *   - Faster cold-start (images pre-pulled in environment)
+ *   - One SDK (@azure/arm-appcontainers) for everything
  *
  * Key environment variables the launcher reads:
  *   - TRANSCODER_IMAGE_H264, TRANSCODER_IMAGE_AV1, etc. — Docker image refs
- *   - AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP — for ACI management
+ *   - AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP — for Azure API calls
  *   - TRANSCODER_CPU_CORES, TRANSCODER_MEMORY_GB — container resources
- *   - AZURE_STORAGE_CONNECTION_STRING — passed to containers for blob access
  */
 
 import type { CodecName, VODRendition } from '@streaming/shared';
@@ -45,7 +47,7 @@ import type { CodecName, VODRendition } from '@streaming/shared';
  *
  * For example, if an admin enables H.264 and AV1, uploading a video creates
  * two TranscodeJobConfig objects — one per codec — and both are launched in
- * parallel as separate containers.
+ * parallel as separate Container Apps Job executions.
  */
 export interface TranscodeJobConfig {
   /** Unique job ID (matches the TranscodeJob record in the database) */
@@ -73,13 +75,13 @@ export interface TranscodeJobConfig {
 }
 
 /**
- * Result of launching a container — contains the resource identifier
- * needed to clean up the container later.
+ * Result of launching a transcoding job execution.
+ * The containerId field stores the execution name for tracking/cancellation.
  */
 export interface LaunchResult {
-  /** Whether the container was launched successfully */
+  /** Whether the job execution was started successfully */
   success: boolean;
-  /** Container resource identifier (ACI container group name, or docker container ID) */
+  /** Job execution name (e.g., "sg-transcode-h264-abc123") — used for tracking */
   containerId?: string;
   /** Error message if launch failed */
   error?: string;
@@ -122,47 +124,90 @@ export function getTranscoderImage(codec: CodecName): string {
   return process.env[envVar] || `streamgate/transcoder-${codec}:latest`;
 }
 
+/**
+ * Get the Container Apps Job name for a given codec.
+ * These are pre-created in Azure via Bicep (e.g., "sg-transcode-h264").
+ *
+ * @param codec - The codec name
+ * @returns The job name as defined in the Bicep template
+ */
+export function getJobName(codec: CodecName): string {
+  return `sg-transcode-${codec}`;
+}
+
 // ============================================================================
-// ACI Launcher (Production)
+// Container Apps Jobs Launcher (Production)
 // ============================================================================
 
 /**
- * Launch a transcoder container via Azure Container Instances.
+ * Build the environment variables array for a transcoding job execution.
  *
- * This function uses dynamic imports for the Azure SDK so that:
- *   1. The module can be imported even if the SDK packages aren't installed
- *   2. The large SDK code is only loaded when we actually create a container
- *
- * The ACI container group is configured as:
- *   - Restart policy: "Never" — run once and exit (ephemeral)
- *   - OS: Linux (the Go+FFmpeg image is Linux-based)
- *   - Resources: configurable CPU/memory via env vars (defaults: 4 cores, 8 GB)
- *   - Environment variables: all job config fields plus Azure credentials
+ * These are passed as template overrides when starting a job execution.
+ * Important: When overriding a Container Apps Job template, the ENTIRE
+ * template is replaced. So we must include all env vars the container needs,
+ * including secretRef entries for secrets defined on the job definition.
  *
  * @param config - The transcoding job configuration
- * @returns LaunchResult with the ACI container group name or error
+ * @returns Array of environment variable objects
  */
-async function launchACI(config: TranscodeJobConfig): Promise<LaunchResult> {
-  // These env vars are required for ACI — checked before we get here, but
-  // TypeScript doesn't know that so we assert them.
+function buildEnvVars(
+  config: TranscodeJobConfig,
+): Array<{ name: string; value?: string; secretRef?: string }> {
+  return [
+    // Per-execution variables — unique to each transcoding request
+    { name: 'JOB_ID', value: config.jobId },
+    { name: 'EVENT_ID', value: config.eventId },
+    { name: 'CODEC', value: config.codec },
+    { name: 'SOURCE_BLOB_URL', value: config.sourceBlobUrl },
+    { name: 'OUTPUT_BLOB_PREFIX', value: config.outputBlobPrefix },
+    { name: 'RENDITIONS', value: JSON.stringify(config.renditions) },
+    { name: 'CODEC_CONFIG', value: config.codecConfig },
+    { name: 'HLS_TIME', value: String(config.hlsTime) },
+    { name: 'FORCE_KEYFRAME_INTERVAL', value: String(config.forceKeyFrameInterval) },
+    { name: 'CALLBACK_URL', value: config.callbackUrl },
+    { name: 'PROGRESS_URL', value: config.progressUrl },
+    // Secrets — defined on the job definition in Bicep, referenced here via secretRef.
+    // This is how Container Apps Jobs securely inject secrets into executions:
+    // the secret value is stored encrypted at the job level, and the execution
+    // template just references it by name.
+    { name: 'AZURE_STORAGE_CONNECTION_STRING', secretRef: 'azure-storage-connection-string' },
+    { name: 'INTERNAL_API_KEY', secretRef: 'internal-api-key' },
+  ];
+}
+
+/**
+ * Launch a transcoder job execution via Azure Container Apps Jobs.
+ *
+ * This function starts a new execution of a pre-created Container Apps Job.
+ * The job definition (image, resources, secrets, timeout, retry policy)
+ * is managed in Bicep. We override the container template at execution time
+ * to inject per-upload variables (job ID, source URL, renditions, etc.).
+ *
+ * How it works:
+ *   1. Determine the job name from the codec (e.g., "sg-transcode-h264")
+ *   2. Build a template override with all env vars the container needs
+ *   3. Call jobs.beginStart() which creates a new execution
+ *   4. Return the execution name for tracking in the database
+ *
+ * The execution runs asynchronously — it calls back to the platform when done.
+ * Azure manages timeout (replicaTimeout) and retry (replicaRetryLimit).
+ *
+ * @param config - The transcoding job configuration
+ * @returns LaunchResult with the execution name or error
+ */
+async function launchContainerAppsJob(config: TranscodeJobConfig): Promise<LaunchResult> {
   const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID!;
   const resourceGroup = process.env.AZURE_RESOURCE_GROUP!;
-
-  // Container group name must be DNS-compatible (lowercase, hyphens, max 63 chars).
-  // We use a short prefix of the event ID to keep it readable in the Azure portal.
-  const containerGroupName = `sg-transcode-${config.eventId.slice(0, 8)}-${config.codec}`;
+  const jobName = getJobName(config.codec as CodecName);
 
   try {
-    // Dynamic import — only loaded when actually creating ACI containers.
-    // This means developers who don't have @azure/arm-containerinstance installed
-    // (e.g., local dev without Azure) won't get import errors at startup.
-    // Dynamic import — Azure SDK is intentionally not in package.json;
-    // it fails gracefully at runtime if not installed.
+    // Dynamic import — Azure SDK is only loaded when actually starting jobs.
+    // This means local dev without Azure SDK installed won't crash at import time.
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore — module may not be installed
-    const { ContainerInstanceManagementClient } = await import('@azure/arm-containerinstance');
+    // @ts-ignore — module may not be installed in all environments
+    const { ContainerAppsAPIClient } = await import('@azure/arm-appcontainers');
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore — module may not be installed
+    // @ts-ignore — module may not be installed in all environments
     const { DefaultAzureCredential } = await import('@azure/identity');
 
     // DefaultAzureCredential tries multiple auth methods in order:
@@ -170,92 +215,44 @@ async function launchACI(config: TranscodeJobConfig): Promise<LaunchResult> {
     //   2. Managed Identity (when running in Azure)
     //   3. Azure CLI credentials (for local dev with `az login`)
     const credential = new DefaultAzureCredential();
-    const client = new ContainerInstanceManagementClient(
-      credential,
-      subscriptionId,
-    );
+    const client = new ContainerAppsAPIClient(credential, subscriptionId);
 
-    const image = getTranscoderImage(config.codec);
+    const image = getTranscoderImage(config.codec as CodecName);
     const cpuCores = parseFloat(process.env.TRANSCODER_CPU_CORES || '4');
     const memoryGB = parseFloat(process.env.TRANSCODER_MEMORY_GB || '8');
 
-    // Build the list of environment variables to pass into the container.
-    // The transcoder image reads these to know what to do.
-    const environmentVariables = [
-      { name: 'JOB_ID', value: config.jobId },
-      { name: 'EVENT_ID', value: config.eventId },
-      { name: 'CODEC', value: config.codec },
-      { name: 'SOURCE_BLOB_URL', value: config.sourceBlobUrl },
-      { name: 'OUTPUT_BLOB_PREFIX', value: config.outputBlobPrefix },
-      { name: 'RENDITIONS', value: JSON.stringify(config.renditions) },
-      { name: 'CODEC_CONFIG', value: config.codecConfig },
-      { name: 'HLS_TIME', value: String(config.hlsTime) },
-      { name: 'FORCE_KEYFRAME_INTERVAL', value: String(config.forceKeyFrameInterval) },
-      { name: 'CALLBACK_URL', value: config.callbackUrl },
-      { name: 'PROGRESS_URL', value: config.progressUrl },
-      // Pass Azure Storage connection string so the container can read the source
-      // video and write HLS segments to blob storage.
-      ...(process.env.AZURE_STORAGE_CONNECTION_STRING
-        ? [
-            {
-              name: 'AZURE_STORAGE_CONNECTION_STRING',
-              secureValue: process.env.AZURE_STORAGE_CONNECTION_STRING,
-            },
-          ]
-        : []),
-      // Pass the internal API key so the container can authenticate its callback
-      // to the Platform App's completion endpoint.
-      ...(process.env.INTERNAL_API_KEY
-        ? [
-            {
-              name: 'INTERNAL_API_KEY',
-              secureValue: process.env.INTERNAL_API_KEY,
-            },
-          ]
-        : []),
-    ];
-
-    // Create the container group in Azure. This is an async operation — Azure
-    // provisions the container and starts it. The beginCreateOrUpdate method
-    // returns a poller that we await to get the final result.
-    const poller = await client.containerGroups.beginCreateOrUpdate(
-      resourceGroup,
-      containerGroupName,
-      {
-        location: process.env.AZURE_LOCATION || 'eastus',
-        osType: 'Linux',
-        // "Never" means the container runs once and stays in "Terminated" state.
-        // We clean it up later via a separate cleanup job or Azure policy.
-        restartPolicy: 'Never',
+    // Start a new execution of the pre-created job.
+    // The template override replaces the entire container spec for this execution.
+    // Secrets defined at the job level remain accessible via secretRef.
+    const poller = await client.jobs.beginStart(resourceGroup, jobName, {
+      template: {
         containers: [
           {
-            name: containerGroupName,
+            name: `transcoder-${config.codec}`,
             image,
             resources: {
-              requests: {
-                cpu: cpuCores,
-                memoryInGB: memoryGB,
-              },
+              cpu: cpuCores,
+              memory: `${memoryGB}Gi`,
             },
-            environmentVariables,
+            env: buildEnvVars(config),
           },
         ],
       },
-    );
+    });
 
-    // Wait for the container group to be created (not for the job to finish —
-    // that happens asynchronously and the container calls back when done).
-    await poller.pollUntilDone();
+    // Wait for Azure to acknowledge the execution start (not for it to finish —
+    // the transcoder runs asynchronously and calls back when done).
+    const execution = await poller.pollUntilDone();
 
     console.log(
-      `[transcoder-launcher] ACI container launched: ${containerGroupName} ` +
-        `(image=${image}, cpu=${cpuCores}, mem=${memoryGB}GB)`,
+      `[transcoder-launcher] Container Apps Job execution started: ${execution.name} ` +
+        `(job=${jobName}, image=${image}, cpu=${cpuCores}, mem=${memoryGB}Gi)`,
     );
 
-    return { success: true, containerId: containerGroupName };
+    return { success: true, containerId: execution.name };
   } catch (error) {
-    // If the Azure SDK isn't installed, the dynamic import throws a MODULE_NOT_FOUND
-    // error. We catch that and fall back to mock mode so local dev still works.
+    // If the Azure SDK isn't installed, the dynamic import throws MODULE_NOT_FOUND.
+    // We catch that and fall back to mock mode so local dev still works.
     const err = error as Error & { code?: string };
     if (err.code === 'MODULE_NOT_FOUND' || err.message?.includes('Cannot find module')) {
       console.warn(
@@ -267,9 +264,9 @@ async function launchACI(config: TranscodeJobConfig): Promise<LaunchResult> {
       };
     }
 
-    // For any other error (auth failure, quota exceeded, etc.), report it
+    // For any other error (auth failure, quota exceeded, job not found, etc.)
     console.error(
-      `[transcoder-launcher] Failed to launch ACI container ${containerGroupName}:`,
+      `[transcoder-launcher] Failed to start job execution for ${jobName}:`,
       err.message,
     );
     return { success: false, error: err.message };
@@ -282,24 +279,27 @@ async function launchACI(config: TranscodeJobConfig): Promise<LaunchResult> {
 
 /**
  * Mock launcher used when Azure credentials are not configured.
- * Logs the job config and returns a fake container ID.
+ * Logs the job config and returns a fake execution name.
  *
  * This lets you develop and test the upload → transcode flow locally without
- * needing Azure credentials or a running ACI service. In the future, this
- * could be extended to run `docker run` locally for real transcoding tests.
+ * needing Azure credentials or Container Apps Jobs deployed. In the future,
+ * this could be extended to run `docker run` locally for real transcoding.
  *
  * @param config - The transcoding job configuration
- * @returns LaunchResult with a mock container ID
+ * @returns LaunchResult with a mock execution name
  */
 async function launchMock(config: TranscodeJobConfig): Promise<LaunchResult> {
   const mockId = `mock-${config.codec}-${config.jobId.slice(0, 8)}`;
 
   console.log(
-    `[transcoder-launcher] MOCK MODE — would launch container for ` +
+    `[transcoder-launcher] MOCK MODE — would start job execution for ` +
       `codec=${config.codec}, event=${config.eventId}, job=${config.jobId}`,
   );
   console.log(
-    `[transcoder-launcher]   image: ${getTranscoderImage(config.codec)}`,
+    `[transcoder-launcher]   job: ${getJobName(config.codec as CodecName)}`,
+  );
+  console.log(
+    `[transcoder-launcher]   image: ${getTranscoderImage(config.codec as CodecName)}`,
   );
   console.log(
     `[transcoder-launcher]   source: ${config.sourceBlobUrl}`,
@@ -319,29 +319,29 @@ async function launchMock(config: TranscodeJobConfig): Promise<LaunchResult> {
 // ============================================================================
 
 /**
- * Launch a single ephemeral transcoder container for one codec.
+ * Launch a single transcoding job execution for one codec.
  *
  * This is the main entry point for starting a transcoding job. It decides
- * whether to use Azure Container Instances (production) or mock mode (local
+ * whether to use Azure Container Apps Jobs (production) or mock mode (local
  * development) based on the presence of the AZURE_SUBSCRIPTION_ID env var.
  *
  * How it works:
- *   1. Check if AZURE_SUBSCRIPTION_ID is set → use ACI
- *   2. Otherwise → use mock mode (just log and return a fake ID)
- *   3. The ACI path also gracefully falls back to mock mode if the Azure SDK
+ *   1. Check if AZURE_SUBSCRIPTION_ID is set → use Container Apps Jobs
+ *   2. Otherwise → use mock mode (just log and return a fake execution name)
+ *   3. The Azure path also gracefully falls back to mock mode if the SDK
  *      packages aren't installed (dynamic import failure)
  *
  * @param config - The transcoding job configuration
- * @returns LaunchResult with the container ID (for cleanup) or error
+ * @returns LaunchResult with the execution name (for tracking) or error
  */
 export async function launchTranscoderContainer(
   config: TranscodeJobConfig,
 ): Promise<LaunchResult> {
-  // If Azure credentials are configured, use ACI for real container creation.
-  // The AZURE_SUBSCRIPTION_ID env var is the signal that we're in a production
-  // (or staging) environment with Azure access.
+  // If Azure credentials are configured, use Container Apps Jobs.
+  // The AZURE_SUBSCRIPTION_ID env var is the signal that we're in a
+  // production (or staging) environment with Azure access.
   if (process.env.AZURE_SUBSCRIPTION_ID) {
-    return launchACI(config);
+    return launchContainerAppsJob(config);
   }
 
   // No Azure credentials — use mock mode for local development.
@@ -349,12 +349,12 @@ export async function launchTranscoderContainer(
 }
 
 /**
- * Launch transcoder containers for all codecs in parallel.
+ * Launch transcoder job executions for all codecs in parallel.
  *
- * Given an array of job configs (one per codec), this starts all containers
+ * Given an array of job configs (one per codec), this starts all executions
  * simultaneously using Promise.allSettled. This means:
  *   - All codecs start transcoding at roughly the same time
- *   - If one codec's container fails to launch, the others still proceed
+ *   - If one codec's job fails to start, the others still proceed
  *   - The caller gets a complete picture of what succeeded and what failed
  *
  * Example usage:
@@ -397,4 +397,65 @@ export async function launchAllTranscoders(
   }
 
   return results;
+}
+
+/**
+ * Stop a running job execution (cancellation).
+ *
+ * Can be used to cancel an in-progress transcoding job, e.g., when a creator
+ * deletes an upload that's currently being transcoded. This calls the
+ * Container Apps Jobs API to terminate the execution.
+ *
+ * In mock mode (local dev), this is a no-op.
+ *
+ * @param codec - The codec of the job to cancel
+ * @param executionName - The execution name from the LaunchResult
+ */
+export async function stopJobExecution(
+  codec: CodecName,
+  executionName: string,
+): Promise<void> {
+  // Mock mode — nothing to stop
+  if (!process.env.AZURE_SUBSCRIPTION_ID || executionName.startsWith('mock-')) {
+    console.log(
+      `[transcoder-launcher] MOCK MODE — would stop execution: ${executionName}`,
+    );
+    return;
+  }
+
+  const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
+  const resourceGroup = process.env.AZURE_RESOURCE_GROUP!;
+  const jobName = getJobName(codec);
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore — module may not be installed
+    const { ContainerAppsAPIClient } = await import('@azure/arm-appcontainers');
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore — module may not be installed
+    const { DefaultAzureCredential } = await import('@azure/identity');
+
+    const client = new ContainerAppsAPIClient(
+      new DefaultAzureCredential(),
+      subscriptionId,
+    );
+
+    const poller = await client.jobs.beginStopExecution(
+      resourceGroup,
+      jobName,
+      executionName,
+    );
+    await poller.pollUntilDone();
+
+    console.log(
+      `[transcoder-launcher] Stopped job execution: ${executionName} (job=${jobName})`,
+    );
+  } catch (error) {
+    const err = error as Error;
+    // Log but don't throw — stopping is best-effort
+    console.error(
+      `[transcoder-launcher] Failed to stop execution ${executionName}:`,
+      err.message,
+    );
+  }
 }
