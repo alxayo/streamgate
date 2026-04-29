@@ -394,6 +394,9 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
         external: true
         targetPort: 3000
         transport: 'http'
+        // Allow internal HTTP traffic from other Container Apps (e.g. rtmp-server webhooks).
+        // External traffic still uses HTTPS via Azure TLS termination.
+        allowInsecure: true
       }
       secrets: [
         {
