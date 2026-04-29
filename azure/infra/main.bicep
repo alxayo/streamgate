@@ -479,7 +479,8 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
             // platform's callback endpoints.
             {
               name: 'PLATFORM_APP_URL'
-              value: !empty(platformAppUrl) ? platformAppUrl : 'https://${platformApp.properties.configuration.ingress.fqdn}'
+              // Can't self-reference platformApp.properties here (BCP079), so construct FQDN from known components
+              value: !empty(platformAppUrl) ? platformAppUrl : 'https://${platformAppName}.${containerEnv.properties.defaultDomain}'
             }
             // Azure Storage connection string — needed by the platform to upload
             // VOD source files to blob storage after the creator's upload completes.
