@@ -138,6 +138,52 @@ Called by rtmp-go when RTMP stream ends. Closes the RtmpSession.
 }
 ```
 
+#### 5. RTMP Native Hook Events
+**Endpoint:** `POST /api/rtmp/hooks` (Internal)
+
+Called by rtmp-go's native hook system for lifecycle events such as `publish_start`
+and `publish_stop`. Streamgate uses `publish_stop` to close active `RtmpSession`
+records when OBS or another publisher disconnects without going through the legacy
+`/api/rtmp/disconnect` flow.
+
+**Authentication:** `X-Internal-Api-Key` header
+
+**Request Body:**
+```json
+{
+  "type": "publish_stop",
+  "timestamp": 1714380000,
+  "conn_id": "conn_abc123",
+  "stream_key": "live/tech-talk-2024-a3b2c1d0e9f8",
+  "data": {
+    "audio_packets": 1234,
+    "video_packets": 5678,
+    "total_bytes": 12345678,
+    "audio_codec": "AAC",
+    "video_codec": "H.264",
+    "duration_sec": 3600.5
+  }
+}
+```
+
+**Important stream key mapping:**
+- rtmp-go sends `stream_key` in `app/streamName` format (for example `live/tech-talk-2024-a3b2c1d0e9f8`)
+- Streamgate stores only the `streamName` portion in `Event.rtmpStreamKeyHash`
+- The hook receiver strips the app prefix before doing the database lookup
+
+**Response (200 OK):**
+```json
+{
+  "ok": true,
+  "action": "session_closed",
+  "closedSessions": 1
+}
+```
+
+Other actions:
+- `logged` for `publish_start`
+- `ignored` for unknown events, missing `stream_key`, or stream keys that do not map to an Event
+
 ### Publisher Flow
 
 ```
@@ -179,15 +225,17 @@ Called by rtmp-go when RTMP stream ends. Closes the RtmpSession.
 7. Stream is ingested to /streams/{eventId}/
    ↓
 
-8. On stream end, rtmp-go (optionally) calls:
-   POST /api/rtmp/disconnect
-   Body: { eventId }
+8. On stream end, rtmp-go emits a native hook event:
+   POST /api/rtmp/hooks
+   Body: { type: "publish_stop", stream_key: "live/{streamKeyHash}", conn_id, data }
    ↓
 
-9. streamgate closes RtmpSession (endedAt = now())
+9. streamgate strips the `live/` app prefix, looks up Event by `rtmpStreamKeyHash`,
+   and closes active RtmpSession records (endedAt = now())
    ↓
 
-10. Audit trail preserved in RtmpSession records
+10. Publisher can reconnect without hitting `already_streaming`, and the audit trail
+    remains preserved in RtmpSession records
 ```
 
 ## Configuration
@@ -337,9 +385,12 @@ ffmpeg -re -i test.mp4 -c copy -f flv \
 
 - [ ] Update RTMP server environment: set `INTERNAL_API_KEY` in rtmp-go config
 - [ ] Verify webhook URL: `http://platform-app:3000/api/rtmp/auth` is accessible from rtmp-go
+- [ ] Verify hook URL: `http://platform-app:3000/api/rtmp/hooks` is accessible from rtmp-go
 - [ ] Test event creation: verify RTMP tokens are generated
 - [ ] Test publish: verify webhook is called and stream accepted
 - [ ] Test single-publisher: verify second publish is rejected
+- [ ] Test publish stop: stop OBS/ffmpeg and verify `publish_stop` closes the active `RtmpSession`
+- [ ] Test reconnect: after stopping OBS/ffmpeg, verify the next publish no longer fails with `already_streaming`
 - [ ] Test token expiry: verify publish rejected after event.endsAt
 - [ ] Monitor logs: watch for webhook failures, timeouts, database errors
 - [ ] Audit trail: verify RtmpSession records are created and closed
