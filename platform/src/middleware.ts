@@ -40,7 +40,6 @@ const ADMIN_PUBLIC_PATHS = [
   '/api/admin/verify-2fa',
   '/api/admin/verify-recovery',
   '/api/admin/emergency-login',
-  '/api/admin/2fa/emergency-reset',
 ];
 
 /** Admin routes allowed when 2FA setup is pending */
