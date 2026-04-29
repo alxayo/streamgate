@@ -258,7 +258,7 @@ export function LoginForm() {
               <Label htmlFor="email" className="text-gray-700">Email</Label>
               <Input
                 id="email"
-                type="email"
+                type="text"
                 placeholder="admin@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
