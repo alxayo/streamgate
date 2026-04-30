@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { EventStatusBadge } from '@/components/admin/event-status-badge';
 import { TokenStatusBadge } from '@/components/admin/token-status-badge';
 import { RtmpTokenDisplay } from '@/components/admin/rtmp-token-display';
+import { RtmpPlayAccessList } from '@/components/admin/rtmp-play-access-list';
 import {
   Dialog,
   DialogContent,
@@ -613,6 +614,10 @@ export default function EventDetailPage() {
             rtmpStreamKeyHash={event.rtmpStreamKeyHash}
           />
         </div>
+      )}
+
+      {event && event.streamType === 'LIVE' && (
+        <RtmpPlayAccessList eventId={event.id} />
       )}
 
       {/* ================================================================

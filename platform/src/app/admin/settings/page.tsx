@@ -19,11 +19,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Info, Save, ChevronDown, ChevronRight, Plus, Trash2, RotateCcw } from 'lucide-react';
+import { Loader2, Info, Save, ChevronDown, ChevronRight, Plus, Trash2, RotateCcw, Shield } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -564,6 +565,20 @@ export default function AdminSettingsPage() {
             {registrationMode === 'approval' && 'New creators can register but must be approved before they can log in.'}
             {registrationMode === 'disabled' && 'The registration page will show an error. Only admins can create new creator accounts.'}
           </p>
+        </div>
+      </Section>
+
+      <Section title="RTMP Play Access" defaultOpen={false}>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-sm text-gray-700">
+            <Shield className="h-4 w-4 text-gray-500" />
+            Manage direct RTMP play IP lists on each live event.
+          </div>
+          <Link href="/admin/events">
+            <Button variant="outline" size="sm" className="bg-white border-gray-300 text-gray-700 hover:bg-gray-50">
+              Open Events
+            </Button>
+          </Link>
         </div>
       </Section>
 
