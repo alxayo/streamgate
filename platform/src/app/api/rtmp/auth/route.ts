@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isValidRtmpToken, isValidStreamKeyHash } from '@/lib/rtmp-tokens';
 import { getConfigValue, CONFIG_KEYS } from '@/lib/system-config';
+import {
+  evaluateRtmpPlayIpAccess,
+  getRtmpPlayAllowlistMode,
+  parseCidrList,
+} from '@/lib/rtmp-play-ip-access';
 
 /**
  * POST /api/rtmp/auth — Webhook for rtmp-go RTMP server auth validation
@@ -35,6 +40,8 @@ export async function POST(request: NextRequest) {
     token?: string;
     action?: string;
     publisherIp?: string;
+    clientIp?: string;
+    remoteAddr?: string;
     // Legacy support: old endpoints using stream_name and RTMP_AUTH_TOKEN
     stream_name?: string;
     legacy_token?: string;
@@ -46,7 +53,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { streamKeyHash, token, action, publisherIp } = body;
+  const { streamKeyHash, token, action, publisherIp, clientIp, remoteAddr } = body;
 
   // Validate inputs
   if (!streamKeyHash || typeof streamKeyHash !== 'string' || !isValidStreamKeyHash(streamKeyHash)) {
@@ -119,6 +126,61 @@ export async function POST(request: NextRequest) {
       { authorized: false, reason: 'token_expired' },
       { status: 403 },
     );
+  }
+
+  if (action === 'play') {
+    // RTMP PLAY has an extra IP policy layer. Publish auth intentionally remains unchanged.
+    const mode = getRtmpPlayAllowlistMode();
+
+    // Prefer the clearer new names, but keep publisherIp so older rtmp-go payloads still work.
+    const remoteAddress = clientIp || remoteAddr || publisherIp || null;
+
+    // Internal CIDRs come from deployment config because they describe the trusted Azure network.
+    const internalCidrs = parseCidrList(process.env.RTMP_INTERNAL_PLAY_ALLOWED_CIDRS || '');
+
+    // In off mode we skip the database query so the feature has no runtime policy cost.
+    const entries = mode === 'off'
+      ? []
+      : await prisma.rtmpPlayAllowlistEntry.findMany({
+        where: { eventId: event.id },
+        select: { cidr: true },
+      });
+
+    const result = evaluateRtmpPlayIpAccess(
+      remoteAddress,
+      entries.map((entry) => entry.cidr),
+      internalCidrs,
+      mode,
+    );
+
+    if (mode === 'audit') {
+      // Audit mode keeps playback open and records what enforce mode would do.
+      console.info('[rtmp-play-ip-allowlist]', {
+        decision: result.allowed ? 'would_allow' : 'would_deny',
+        eventId: event.id,
+        streamKeyHash,
+        observedIp: result.clientIp,
+        mode,
+        reason: result.reason,
+        matchedCidr: result.matchedCidr,
+      });
+    }
+
+    if (mode === 'enforce' && !result.allowed) {
+      // Keep the client-facing reason vague; detailed context stays in server logs.
+      console.warn('[rtmp-play-ip-allowlist]', {
+        decision: 'deny',
+        eventId: event.id,
+        streamKeyHash,
+        observedIp: result.clientIp,
+        mode,
+        reason: result.reason,
+      });
+      return NextResponse.json(
+        { authorized: false, reason: 'ip_not_allowed' },
+        { status: 403 },
+      );
+    }
   }
 
   // For PUBLISH action: check single-publisher enforcement

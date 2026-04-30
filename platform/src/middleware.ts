@@ -18,19 +18,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getIronSession } from 'iron-session';
 import type { SessionData } from '@/lib/admin-session';
 import type { CreatorSessionData } from '@/lib/creator-session';
-
-/**
- * Extract the client's real IP address from proxy headers.
- * Azure Container Apps and nginx set X-Forwarded-For.
- */
-function getClientIp(request: NextRequest): string {
-  // Azure Container Apps / reverse proxies set X-Forwarded-For
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    return forwarded.split(',')[0].trim();
-  }
-  return request.headers.get('x-real-ip') ?? 'unknown';
-}
+import { getClientIp } from '@/lib/client-ip';
 
 /** Admin routes that don't require authentication */
 const ADMIN_PUBLIC_PATHS = [
