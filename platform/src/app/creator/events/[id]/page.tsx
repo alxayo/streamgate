@@ -16,7 +16,8 @@
 import { useState, useEffect, useRef, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Copy, Check, Pencil, Trash2, Archive, Eraser, Save, X, Upload, FileVideo, RefreshCw, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Pencil, Trash2, Archive, Eraser, Save, X, Upload, FileVideo, RefreshCw, RotateCcw, QrCode } from 'lucide-react';
+import { IngestQrDialog, type IngestQrKind } from '@/components/ingest-qr-dialog';
 
 interface EventData {
   id: string;
@@ -91,6 +92,7 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
   const [generateLabel, setGenerateLabel] = useState('');
   const [generating, setGenerating] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [selectedIngestQr, setSelectedIngestQr] = useState<IngestQrKind | null>(null);
 
   // Edit mode state
   const [editing, setEditing] = useState(false);
@@ -521,8 +523,19 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
       {/* Ingest Endpoints */}
       {ingest && event.streamType === 'LIVE' && !event.isArchived && (
         <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900">Streaming Endpoints</h2>
-          <p className="text-sm text-gray-500">Use these URLs in OBS, FFmpeg, or any RTMP/SRT encoder to stream to this event.</p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Streaming Endpoints</h2>
+              <p className="text-sm text-gray-500">Use these URLs in OBS, FFmpeg, or any RTMP/SRT encoder to stream to this event.</p>
+            </div>
+            <button
+              onClick={() => setSelectedIngestQr('rtmp')}
+              className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+              title="Show RTMP StreamCaster QR code"
+            >
+              <QrCode className="h-4 w-4" />
+            </button>
+          </div>
 
           {/* Stream Key & Token — prominent display */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -562,7 +575,16 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
 
           {/* RTMP */}
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-gray-700">RTMP</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-medium text-gray-700">RTMP</h3>
+              <button
+                onClick={() => setSelectedIngestQr('rtmp')}
+                className="p-1.5 text-gray-400 hover:text-gray-600 shrink-0"
+                title="Show RTMP StreamCaster QR code"
+              >
+                <QrCode className="h-4 w-4" />
+              </button>
+            </div>
             <div className="space-y-2">
               <div>
                 <label className="text-xs text-gray-500">Full URL (for FFmpeg)</label>
@@ -576,6 +598,13 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
                     title="Copy"
                   >
                     {copiedField === 'rtmp-url' ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                  <button
+                    onClick={() => setSelectedIngestQr('rtmp')}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 shrink-0"
+                    title="Show RTMP StreamCaster QR code"
+                  >
+                    <QrCode className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -617,7 +646,16 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
           {/* SRT */}
           {ingest.srt && (
             <div className="space-y-2">
-              <h3 className="text-sm font-medium text-gray-700">SRT</h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-medium text-gray-700">SRT</h3>
+                <button
+                  onClick={() => setSelectedIngestQr('srt')}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 shrink-0"
+                  title="Show SRT StreamCaster QR code"
+                >
+                  <QrCode className="h-4 w-4" />
+                </button>
+              </div>
               <div>
                 <label className="text-xs text-gray-500">Full URL</label>
                 <div className="flex items-center gap-2 mt-0.5">
@@ -630,6 +668,13 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
                     title="Copy"
                   >
                     {copiedField === 'srt-url' ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                  <button
+                    onClick={() => setSelectedIngestQr('srt')}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 shrink-0"
+                    title="Show SRT StreamCaster QR code"
+                  >
+                    <QrCode className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -995,6 +1040,14 @@ export default function CreatorEventDetailPage({ params }: { params: Promise<{ i
           </div>
         )}
       </div>
+
+      <IngestQrDialog
+        eventName={event.title}
+        ingest={ingest}
+        kind={selectedIngestQr}
+        open={selectedIngestQr !== null}
+        onOpenChange={(open) => { if (!open) setSelectedIngestQr(null); }}
+      />
     </div>
   );
 }

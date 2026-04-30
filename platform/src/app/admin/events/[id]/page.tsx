@@ -10,6 +10,7 @@ import { EventStatusBadge } from '@/components/admin/event-status-badge';
 import { TokenStatusBadge } from '@/components/admin/token-status-badge';
 import { RtmpTokenDisplay } from '@/components/admin/rtmp-token-display';
 import { RtmpPlayAccessList } from '@/components/admin/rtmp-play-access-list';
+import { IngestQrDialog, type IngestQrKind } from '@/components/ingest-qr-dialog';
 import {
   Dialog,
   DialogContent,
@@ -96,6 +97,7 @@ export default function EventDetailPage() {
   const [deleteConfirmTitle, setDeleteConfirmTitle] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [selectedIngestQr, setSelectedIngestQr] = useState<IngestQrKind | null>(null);
   const [purging, setPurging] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [togglingAutoPurge, setTogglingAutoPurge] = useState(false);
@@ -486,9 +488,18 @@ export default function EventDetailPage() {
           ================================================================ */}
       {event.streamType === 'LIVE' && streamConfig && (
         <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <Radio className="h-4 w-4 text-red-500" />
-            <h3 className="font-medium text-gray-900">Ingest Endpoints</h3>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Radio className="h-4 w-4 text-red-500" />
+              <h3 className="font-medium text-gray-900">Ingest Endpoints</h3>
+            </div>
+            <button
+              onClick={() => setSelectedIngestQr('rtmp')}
+              className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+              title="Show RTMP StreamCaster QR code"
+            >
+              <QrCode className="h-4 w-4" />
+            </button>
           </div>
 
           {/* Stream Key & Token — prominent display */}
@@ -539,6 +550,13 @@ export default function EventDetailPage() {
               >
                 {copiedField === 'rtmp-url' ? <Check className="h-4 w-4 text-green-500" /> : <ClipboardCopy className="h-4 w-4" />}
               </button>
+              <button
+                onClick={() => setSelectedIngestQr('rtmp')}
+                className="p-2 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                title="Show RTMP StreamCaster QR code"
+              >
+                <QrCode className="h-4 w-4" />
+              </button>
             </div>
           </div>
 
@@ -577,7 +595,16 @@ export default function EventDetailPage() {
           {/* SRT — if configured */}
           {streamConfig.ingest.srt && (
             <div className="space-y-1 pt-2 border-t border-gray-100">
-              <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">SRT</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">SRT</p>
+                <button
+                  onClick={() => setSelectedIngestQr('srt')}
+                  className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                  title="Show SRT StreamCaster QR code"
+                >
+                  <QrCode className="h-3.5 w-3.5" />
+                </button>
+              </div>
               <div className="flex items-center gap-2">
                 <code className="flex-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-sm font-mono text-gray-800 break-all select-all">
                   {streamConfig.ingest.srt.url}
@@ -587,6 +614,13 @@ export default function EventDetailPage() {
                   className="p-2 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
                 >
                   {copiedField === 'srt-url' ? <Check className="h-4 w-4 text-green-500" /> : <ClipboardCopy className="h-4 w-4" />}
+                </button>
+                <button
+                  onClick={() => setSelectedIngestQr('srt')}
+                  className="p-2 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                  title="Show SRT StreamCaster QR code"
+                >
+                  <QrCode className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -1077,6 +1111,13 @@ export default function EventDetailPage() {
 
       {/* QR Code Dialog */}
       <TokenQrDialog code={qrCode} open={qrCode !== null} onOpenChange={(open) => { if (!open) setQrCode(null); }} />
+      <IngestQrDialog
+        eventName={event.title}
+        ingest={streamConfig?.ingest ?? null}
+        kind={selectedIngestQr}
+        open={selectedIngestQr !== null}
+        onOpenChange={(open) => { if (!open) setSelectedIngestQr(null); }}
+      />
     </div>
   );
 }
