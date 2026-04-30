@@ -146,46 +146,54 @@ export function IngestQrDialog({ eventName, ingest, kind, open, onOpenChange }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-white border-gray-200 text-gray-900 max-w-md">
+      <DialogContent className="bg-white border-gray-200 text-gray-900 w-[calc(100vw-2rem)] max-w-[420px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="text-gray-900">{label} StreamCaster QR Code</DialogTitle>
           <DialogDescription className="text-gray-500">
-            Scan this QR code to import the {label} ingest endpoint for {eventName}.
+            Scan this QR code to import the {label} ingest endpoint for{' '}
+            <span className="font-medium break-words">{eventName}</span>.
           </DialogDescription>
         </DialogHeader>
 
         {payload ? (
-          <div className="flex flex-col items-center gap-4 py-2">
-            <div className="bg-white p-4 rounded-lg border border-gray-200">
-              <QRCodeSVG value={payload} size={220} level="H" />
+          <div className="flex w-full min-w-0 flex-col items-center gap-4 py-2">
+            <div className="flex w-full justify-center">
+              <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                <QRCodeSVG value={payload} size={216} level="H" />
+              </div>
             </div>
 
             <div ref={canvasRef} className="hidden">
               <QRCodeCanvas value={payload} size={480} level="H" />
             </div>
 
-            <button
-              onClick={copyPayload}
-              className="flex w-full items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-left text-xs text-gray-600 hover:text-gray-900 transition-colors"
-              title="Copy StreamCaster JSON"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono">{payload}</span>
-              {copied ? (
-                <Check className="h-3.5 w-3.5 flex-shrink-0 text-green-600" />
-              ) : (
-                <Copy className="h-3.5 w-3.5 flex-shrink-0" />
-              )}
-            </button>
+            <div className="w-full min-w-0 rounded-md border border-gray-200 bg-gray-50 p-3">
+              <p className="max-h-20 overflow-y-auto break-all font-mono text-xs leading-5 text-gray-600">
+                {payload}
+              </p>
+            </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={downloadPng}
-              className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
-            >
-              <Download className="h-3.5 w-3.5 mr-1" />
-              Download PNG
-            </Button>
+            <div className="grid w-full grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={copyPayload}
+                className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 mr-1 text-green-600" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
+                {copied ? 'Copied' : 'Copy JSON'}
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadPng}
+                className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
+              >
+                <Download className="h-3.5 w-3.5 mr-1" />
+                Download PNG
+              </Button>
+            </div>
           </div>
         ) : (
           <p className="text-sm text-red-600">Unable to build a StreamCaster payload for this endpoint.</p>

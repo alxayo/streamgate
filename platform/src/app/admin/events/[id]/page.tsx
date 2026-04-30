@@ -488,18 +488,9 @@ export default function EventDetailPage() {
           ================================================================ */}
       {event.streamType === 'LIVE' && streamConfig && (
         <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Radio className="h-4 w-4 text-red-500" />
-              <h3 className="font-medium text-gray-900">Ingest Endpoints</h3>
-            </div>
-            <button
-              onClick={() => setSelectedIngestQr('rtmp')}
-              className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
-              title="Show RTMP StreamCaster QR code"
-            >
-              <QrCode className="h-4 w-4" />
-            </button>
+          <div className="flex items-center gap-2">
+            <Radio className="h-4 w-4 text-red-500" />
+            <h3 className="font-medium text-gray-900">Ingest Endpoints</h3>
           </div>
 
           {/* Stream Key & Token — prominent display */}
@@ -595,16 +586,7 @@ export default function EventDetailPage() {
           {/* SRT — if configured */}
           {streamConfig.ingest.srt && (
             <div className="space-y-1 pt-2 border-t border-gray-100">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">SRT</p>
-                <button
-                  onClick={() => setSelectedIngestQr('srt')}
-                  className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
-                  title="Show SRT StreamCaster QR code"
-                >
-                  <QrCode className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">SRT</p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-sm font-mono text-gray-800 break-all select-all">
                   {streamConfig.ingest.srt.url}
