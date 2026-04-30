@@ -74,6 +74,17 @@ param corsAllowedOrigin string = ''
 @description('IP address allowed to access the admin console (empty = no restriction)')
 param adminAllowedIp string = ''
 
+@allowed([
+  'off'
+  'audit'
+  'enforce'
+])
+@description('RTMP PLAY IP allow-list rollout mode. Use audit first to verify observed source IPs before enforcing.')
+param rtmpPlayIpAllowlistMode string = 'audit'
+
+@description('Comma-separated internal CIDRs that may RTMP PLAY without per-event allow-list entries. Defaults to the rtmp-go VNet range.')
+param rtmpInternalPlayAllowedCidrs string = '10.0.0.0/16'
+
 @description('RTMP auth token for validating publish requests from the RTMP server callback')
 @secure()
 param rtmpAuthToken string = ''
@@ -474,6 +485,16 @@ resource platformApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'ADMIN_ALLOWED_IP'
               value: adminAllowedIp
+            }
+            {
+              // StreamGate reads this at runtime to decide whether to skip, audit, or enforce RTMP PLAY IP rules.
+              name: 'RTMP_PLAY_IP_ALLOWLIST_MODE'
+              value: rtmpPlayIpAllowlistMode
+            }
+            {
+              // Trusted private ranges bypass per-event external allow lists for service-to-service RTMP PLAY.
+              name: 'RTMP_INTERNAL_PLAY_ALLOWED_CIDRS'
+              value: rtmpInternalPlayAllowedCidrs
             }
             // PLATFORM_APP_URL — the platform's own public URL, used by transcoder
             // containers to send progress/completion callbacks. When using custom

@@ -19,6 +19,8 @@
 #   DNS_RESOURCE_GROUP        — resource group for DNS zone (default: rg-dns)
 #   DNS_ZONE_NAME             — domain name (default: port-80.com)
 #   ADMIN_ALLOWED_IP          — IP allowed to access /admin (auto-detected if empty)
+#   RTMP_PLAY_IP_ALLOWLIST_MODE       — off|audit|enforce (default: audit)
+#   RTMP_INTERNAL_PLAY_ALLOWED_CIDRS  — comma-separated internal CIDRs allowed to RTMP PLAY (default: 10.0.0.0/16)
 #
 # Prerequisites:
 #   - Azure CLI logged in (az login)
@@ -64,6 +66,10 @@ DEPLOY_WARNINGS=0
 # --- Configuration ---
 RESOURCE_GROUP="${RESOURCE_GROUP:-rg-rtmpgo}"
 LOCATION="${LOCATION:-eastus2}"
+# Start in audit mode so operators can verify observed RTMP client IPs before blocking traffic.
+RTMP_PLAY_IP_ALLOWLIST_MODE="${RTMP_PLAY_IP_ALLOWLIST_MODE:-audit}"
+# Internal Container Apps/VNet clients should keep working even when external RTMP PLAY is enforced.
+RTMP_INTERNAL_PLAY_ALLOWED_CIDRS="${RTMP_INTERNAL_PLAY_ALLOWED_CIDRS:-10.0.0.0/16}"
 IMAGE_TAG="v$(date +%s)"
 
 echo "============================================"
@@ -191,6 +197,8 @@ DEPLOY_OUTPUT=$(az deployment group create \
     adminPasswordHash="$ADMIN_PASSWORD_HASH" \
     adminSessionSecret="$ADMIN_SESSION_SECRET" \
     adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
+    rtmpPlayIpAllowlistMode="$RTMP_PLAY_IP_ALLOWLIST_MODE" \
+    rtmpInternalPlayAllowedCidrs="$RTMP_INTERNAL_PLAY_ALLOWED_CIDRS" \
   --query 'properties.outputs' \
   --output json)
 
@@ -349,6 +357,8 @@ DEPLOY_OUTPUT=$(az deployment group create \
     upstreamSasToken="$UPSTREAM_SAS_TOKEN" \
     upstreamAdminSasToken="$UPSTREAM_ADMIN_SAS_TOKEN" \
     adminAllowedIp="${ADMIN_ALLOWED_IP:-}" \
+    rtmpPlayIpAllowlistMode="$RTMP_PLAY_IP_ALLOWLIST_MODE" \
+    rtmpInternalPlayAllowedCidrs="$RTMP_INTERNAL_PLAY_ALLOWED_CIDRS" \
     azureStorageConnectionString="$AZURE_STORAGE_CONNECTION_STRING" \
     transcoderImageH264="${TRANSCODER_IMAGE:-}" \
   --query 'properties.outputs' \
