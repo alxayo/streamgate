@@ -116,6 +116,38 @@ Called by rtmp-go on every RTMP publish/play request.
 - `already_streaming`: Active RtmpSession exists (action = "publish" only)
 - `internal_error`: Database write failed
 
+### RTMP PLAY IP Allow-List
+
+Direct RTMP PLAY is controlled per event by StreamGate when rtmp-go calls
+`POST /api/rtmp/auth` with `action: "play"`. Publish authorization is unchanged:
+publish still uses the event RTMP token and single-publisher session checks.
+
+Each LIVE event can have RTMP PLAY allow-list entries in the admin event detail
+page under **RTMP Play Access**. Entries may be single IPs or CIDR ranges. Single
+IPs are stored as host CIDRs, for example `203.0.113.10/32` or `2001:db8::1/128`.
+The **Add my current IP** action stores the admin browser IP as seen by StreamGate
+through `X-Forwarded-For` / `X-Real-IP`.
+
+Internal Azure clients are controlled by deployment configuration, not the event
+UI. `RTMP_INTERNAL_PLAY_ALLOWED_CIDRS` is a comma-separated list of trusted
+private ranges that may RTMP PLAY without per-event entries. The Azure Bicep
+default is `10.0.0.0/16`, matching the current rtmp-go VNet range.
+
+Rollout is controlled by `RTMP_PLAY_IP_ALLOWLIST_MODE`:
+
+| Mode | Behavior |
+|------|----------|
+| `off` | Skip RTMP PLAY IP policy entirely. Valid RTMP token auth still applies. |
+| `audit` | Evaluate internal CIDRs and per-event entries, log `would_allow` / `would_deny`, but allow otherwise valid authenticated RTMP PLAY. Recommended first Azure rollout. |
+| `enforce` | Allow internal CIDR matches and per-event entry matches; deny other external RTMP PLAY clients with `ip_not_allowed`. |
+
+Before switching Azure to `enforce`, test RTMP PLAY from an external IP and an
+internal Container App while in `audit`. Confirm the StreamGate logs show the
+actual expected client IP. If Azure Container Apps TCP ingress reports only a
+proxy/private address for external clients, application-level client IP
+allow-listing is not reliable and must move to a network-layer control or a TCP
+proxy that preserves the source IP.
+
 #### 4. RTMP Disconnect Notification (Optional)
 **Endpoint:** `POST /api/rtmp/disconnect` (Internal)
 
@@ -251,6 +283,10 @@ DATABASE_URL=postgresql://...
 
 # RTMP webhook callback (optional, for testing)
 RTMP_SERVER_URL=http://localhost:4000
+
+# RTMP PLAY IP allow-list rollout
+RTMP_PLAY_IP_ALLOWLIST_MODE=audit
+RTMP_INTERNAL_PLAY_ALLOWED_CIDRS=10.0.0.0/16
 ```
 
 ### rtmp-go Environment Variables
