@@ -181,6 +181,7 @@ model Event {
 
   tokens         Token[]
   rtmpSessions   RtmpSession[]
+  rtmpPlayAllowlistEntries RtmpPlayAllowlistEntry[]
   upload         Upload?        // VOD upload for this event (null for live-only events)
 
   @@index([channelId])
@@ -237,6 +238,21 @@ model RtmpSession {
 
   @@index([eventId])
   @@index([endedAt]) // Fast query for active sessions: WHERE endedAt IS NULL
+}
+
+/// Per-event allow list for direct RTMP PLAY access.
+/// Single IPs are stored as canonical host CIDRs (/32 for IPv4, /128 for IPv6).
+model RtmpPlayAllowlistEntry {
+  id        String   @id @default(uuid())
+  eventId   String
+  cidr      String
+  label     String?
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, cidr])
+  @@index([eventId])
 }
 
 model SystemSettings {
