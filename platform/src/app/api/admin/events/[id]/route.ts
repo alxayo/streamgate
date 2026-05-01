@@ -27,6 +27,20 @@ export async function GET(
           },
         },
       },
+      rtmpSessions: {
+        where: { endedAt: null },
+        orderBy: { startedAt: 'desc' },
+        take: 1,
+        select: {
+          id: true,
+          connId: true,
+          streamKey: true,
+          rtmpPublisherIp: true,
+          startedAt: true,
+          endedReason: true,
+          createdAt: true,
+        },
+      },
     },
   });
 
@@ -59,10 +73,17 @@ export async function GET(
     0,
   );
 
-  const { tokens: _, ...eventData } = event;
+  const activeRtmpSession = event.rtmpSessions[0]
+    ? {
+        ...event.rtmpSessions[0],
+        ageSeconds: Math.max(0, Math.floor((Date.now() - event.rtmpSessions[0].startedAt.getTime()) / 1000)),
+      }
+    : null;
+
+  const { tokens: _, rtmpSessions: __, ...eventData } = event;
 
   return NextResponse.json({
-    data: { ...eventData, tokenBreakdown, activeViewers },
+    data: { ...eventData, tokenBreakdown, activeViewers, activeRtmpSession },
   });
 }
 
