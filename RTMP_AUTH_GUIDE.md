@@ -26,9 +26,14 @@ This document describes the per-event RTMP authentication system integrated into
 **RtmpSession Model (Audit Trail):**
 - `id` (String, PK): Unique session ID
 - `eventId` (String, FK): Event being streamed
+- `connId` (String, nullable): rtmp-go connection ID attached by the `publish_start` hook
+- `streamKey` (String, nullable): Full RTMP stream key seen by StreamGate, such as `live/tech-talk-2024-a3b2c1d0e9f8`
 - `rtmpPublisherIp` (String): Publisher IP for audit trail
 - `startedAt` (DateTime): When RTMP stream began
 - `endedAt` (DateTime, nullable): When stream ended (null = active)
+- `endedReason` (String, nullable): Why StreamGate ended the session, such as `publish_stop`, `stale_timeout`, or `manual_db_unlock`
+- `endedBy` (String, nullable): Admin/user identifier for manual unlocks
+- `endedMetadata` (String, nullable): JSON metadata captured for troubleshooting
 
 ### API Contracts
 
@@ -173,10 +178,13 @@ Called by rtmp-go when RTMP stream ends. Closes the RtmpSession.
 #### 5. RTMP Native Hook Events
 **Endpoint:** `POST /api/rtmp/hooks` (Internal)
 
-Called by rtmp-go's native hook system for lifecycle events such as `publish_start`
-and `publish_stop`. Streamgate uses `publish_stop` to close active `RtmpSession`
-records when OBS or another publisher disconnects without going through the legacy
-`/api/rtmp/disconnect` flow.
+Called by rtmp-go's native hook system for lifecycle events such as `publish_start` and `publish_stop`.
+Streamgate uses these hooks to keep the `RtmpSession` database state in sync with the actual publisher lifecycle.
+
+For a beginner-friendly mental model: `/api/rtmp/auth` creates the database row,
+`publish_start` fills in the rtmp-go `conn_id`, and `publish_stop` closes the row
+only if the same `conn_id` is still active. This prevents an old delayed stop hook
+from one publisher connection from unlocking or closing a newer publisher session.
 
 **Authentication:** `X-Internal-Api-Key` header
 
@@ -213,8 +221,48 @@ records when OBS or another publisher disconnects without going through the lega
 ```
 
 Other actions:
-- `logged` for `publish_start`
+- `session_tagged` when `publish_start` attaches `conn_id` to the active `RtmpSession`
+- `already_tagged` when a duplicate `publish_start` arrives for the same `conn_id`
+- `ignored_stale_conn_id` when `publish_stop` belongs to an old connection and must not close the current session
+- `ignored_no_active_session` when no active `RtmpSession` exists for the event
 - `ignored` for unknown events, missing `stream_key`, or stream keys that do not map to an Event
+
+#### 6. Emergency RTMP Session Unlock
+**Endpoint:** `POST /api/admin/events/:id/rtmp-session/reset` (Admin)
+
+This is an admin-only recovery endpoint for emergency situations where rtmp-go or
+the publisher fails to send `publish_stop`. It is intentionally **database-only**:
+it marks active `RtmpSession` rows as ended, but it does not disconnect an active
+publisher from rtmp-go.
+
+Use this only when the event is stuck with `already_streaming` and you have
+confirmed the old publisher is gone or you intentionally want to clear StreamGate's
+publisher lock.
+
+**Authentication:** Admin session with `events:edit` permission
+
+**Request Body:**
+```json
+{
+  "confirmation": "UNLOCK"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "success": true,
+    "closedSessions": 1,
+    "message": "Unlocked 1 active RTMP session(s)."
+  }
+}
+```
+
+Rows closed by this endpoint are marked with:
+- `endedReason = "manual_db_unlock"`
+- `endedBy = <admin email/user id>` when available
+- `endedMetadata` containing the active session snapshot before the unlock
 
 ### Publisher Flow
 
@@ -257,18 +305,37 @@ Other actions:
 7. Stream is ingested to /streams/{eventId}/
    ↓
 
-8. On stream end, rtmp-go emits a native hook event:
+8. When publishing starts, rtmp-go emits a native hook event:
+  POST /api/rtmp/hooks
+  Body: { type: "publish_start", stream_key: "live/{streamKeyHash}", conn_id, data }
+  ↓
+
+9. streamgate finds the active RtmpSession created during auth and stores `conn_id`
+  on that row
+  ↓
+
+10. On stream end, rtmp-go emits a native hook event:
    POST /api/rtmp/hooks
    Body: { type: "publish_stop", stream_key: "live/{streamKeyHash}", conn_id, data }
    ↓
 
-9. streamgate strips the `live/` app prefix, looks up Event by `rtmpStreamKeyHash`,
-   and closes active RtmpSession records (endedAt = now())
+11. streamgate strips the `live/` app prefix, looks up Event by `rtmpStreamKeyHash`,
+  and closes only active RtmpSession records with the matching `conn_id`
    ↓
 
-10. Publisher can reconnect without hitting `already_streaming`, and the audit trail
+12. Publisher can reconnect without hitting `already_streaming`, and the audit trail
     remains preserved in RtmpSession records
 ```
+
+### Emergency Recovery Flow
+
+If a publisher or rtmp-go process dies before `publish_stop` reaches StreamGate,
+the event may remain locked because `RtmpSession.endedAt` is still null. An admin
+can open the event detail page and use **Emergency Unlock** in the **RTMP Publisher
+Session** panel.
+
+The unlock only updates StreamGate's database. It does not send a control message
+to rtmp-go and does not stop any still-connected publisher.
 
 ## Configuration
 

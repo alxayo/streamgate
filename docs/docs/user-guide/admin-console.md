@@ -308,6 +308,23 @@ Abandoned sessions are automatically cleaned up after the configured timeout (de
 - Keep the admin console open to handle support requests
 - Have spare tokens available for last-minute attendees
 
+### RTMP Publisher Session Recovery
+
+For live events, the event detail page shows an **RTMP Publisher Session** panel.
+When a publisher is active, the panel shows the connection ID, publisher IP,
+start time, session age, and stream key when available.
+
+If a stream is stuck and a new publisher receives an `already_streaming` error,
+an admin with event edit access can use **Emergency Unlock**. This clears
+StreamGate's database lock for the active RTMP publisher session.
+
+:::warning Emergency unlock does not stop the publisher
+Emergency Unlock does **not** disconnect OBS, FFmpeg, or rtmp-go. It only marks
+the StreamGate session record as ended. Use it when the old publisher connection
+is gone, or when you intentionally need to clear StreamGate's lock before a new
+publish attempt.
+:::
+
 ### After the Event
 - Review session statistics
 - Revoke any unused tokens if not needed for VOD rewatch
