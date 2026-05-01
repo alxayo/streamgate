@@ -227,16 +227,23 @@ model ActiveSession {
 /// Tracks single-publisher enforcement and publisher IP logging.
 /// When an RTMP stream ends, endedAt is set (no hard delete for audit trail).
 model RtmpSession {
-  id            String   @id @default(uuid())
-  eventId       String
-  rtmpPublisherIp String  // Publisher IP address for audit trail
-  startedAt     DateTime @default(now())
-  endedAt       DateTime? // Null while streaming; set to now() on disconnect
-  createdAt     DateTime @default(now())
+  id              String   @id @default(uuid())
+  eventId         String
+  connId          String?  // rtmp-go hook connection ID (attached on publish_start)
+  streamKey       String?  // Full RTMP stream key from hooks (for example live/event-slug)
+  rtmpPublisherIp String   // Publisher IP address for audit trail
+  startedAt       DateTime @default(now())
+  endedAt         DateTime? // Null while streaming; set to now() on disconnect
+  endedReason     String?  // publish_stop, manual_db_unlock, stale_timeout, etc.
+  endedBy         String?  // Admin/user who forced a manual DB unlock, if any
+  endedMetadata   String?  // JSON metadata for hook metrics or manual reset context
+  createdAt       DateTime @default(now())
 
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([eventId])
+  @@index([connId])
+  @@index([streamKey])
   @@index([endedAt]) // Fast query for active sessions: WHERE endedAt IS NULL
 }
 
