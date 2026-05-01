@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users, QrCode, Eraser, Film, Loader2, Radio, Settings, ClipboardCopy, Upload, FileVideo, RefreshCw, RotateCcw } from 'lucide-react';
+import { Plus, Download, Edit, Power, Archive, Trash2, Ban, Copy, Check, Play, Users, QrCode, Eraser, Film, Loader2, Radio, Settings, ClipboardCopy, Upload, FileVideo, RefreshCw, RotateCcw, AlertTriangle, Unlock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EventStatusBadge } from '@/components/admin/event-status-badge';
@@ -36,6 +36,14 @@ interface EventDetail {
   activeViewers: number;
   rtmpToken?: string | null;
   rtmpStreamKeyHash?: string | null;
+  activeRtmpSession: {
+    id: string;
+    connId: string | null;
+    streamKey: string | null;
+    rtmpPublisherIp: string;
+    startedAt: string;
+    ageSeconds: number;
+  } | null;
   _count: { tokens: number };
   tokenBreakdown: { unused: number; redeemed: number; expired: number; revoked: number };
 }
@@ -101,6 +109,10 @@ export default function EventDetailPage() {
   const [purging, setPurging] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [togglingAutoPurge, setTogglingAutoPurge] = useState(false);
+  const [showRtmpResetDialog, setShowRtmpResetDialog] = useState(false);
+  const [rtmpResetConfirm, setRtmpResetConfirm] = useState('');
+  const [resettingRtmpSession, setResettingRtmpSession] = useState(false);
+  const [rtmpResetError, setRtmpResetError] = useState<string | null>(null);
 
   // --- VOD Upload state ---
   // Tracks the selected file, upload progress, and server-side upload/transcode status
@@ -245,6 +257,34 @@ export default function EventDetailPage() {
       console.error('Failed to toggle auto-purge');
     } finally {
       setTogglingAutoPurge(false);
+    }
+  };
+
+  const handleResetRtmpSession = async () => {
+    if (rtmpResetConfirm !== 'UNLOCK') return;
+    setResettingRtmpSession(true);
+    setRtmpResetError(null);
+    try {
+      // This is intentionally a DB unlock, not a remote stop command. The API
+      // clears StreamGate's active session row and the dialog text warns admins
+      // that any current RTMP publisher may still be connected to rtmp-go.
+      const res = await fetch(`/api/admin/events/${eventId}/rtmp-session/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: rtmpResetConfirm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRtmpResetError(data.error || 'Failed to unlock RTMP session');
+        return;
+      }
+      setShowRtmpResetDialog(false);
+      setRtmpResetConfirm('');
+      fetchEvent();
+    } catch {
+      setRtmpResetError('Failed to unlock RTMP session');
+    } finally {
+      setResettingRtmpSession(false);
     }
   };
 
@@ -481,6 +521,66 @@ export default function EventDetailPage() {
           </div>
         ))}
       </div>
+
+      {event.streamType === 'LIVE' && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Radio className="h-4 w-4 text-red-500" />
+              <h3 className="font-medium text-gray-900">RTMP Publisher Session</h3>
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                event.activeRtmpSession
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-100 text-gray-500'
+              }`}>
+                {event.activeRtmpSession ? 'Active' : 'Idle'}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRtmpResetError(null);
+                setRtmpResetConfirm('');
+                setShowRtmpResetDialog(true);
+              }}
+              disabled={!event.activeRtmpSession}
+              className="bg-white border-red-300 text-red-700 hover:bg-red-50 disabled:border-gray-200 disabled:text-gray-400 disabled:hover:bg-white"
+            >
+              <Unlock className="h-3.5 w-3.5 mr-1" /> Emergency Unlock
+            </Button>
+          </div>
+
+          {event.activeRtmpSession ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Connection</p>
+                <p className="mt-1 font-mono text-gray-900 break-all">{event.activeRtmpSession.connId || 'pending hook'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Publisher IP</p>
+                <p className="mt-1 font-mono text-gray-900 break-all">{event.activeRtmpSession.rtmpPublisherIp}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Started</p>
+                <p className="mt-1 text-gray-900">{new Date(event.activeRtmpSession.startedAt).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Age</p>
+                <p className="mt-1 text-gray-900">{formatDuration(event.activeRtmpSession.ageSeconds)}</p>
+              </div>
+              {event.activeRtmpSession.streamKey && (
+                <div className="col-span-2 md:col-span-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Stream Key</p>
+                  <p className="mt-1 font-mono text-gray-900 break-all">{event.activeRtmpSession.streamKey}</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No active RTMP publisher session.</p>
+          )}
+        </div>
+      )}
 
       {/* ================================================================
           INGEST ENDPOINTS — RTMP/SRT URLs for OBS/FFmpeg
@@ -1086,6 +1186,61 @@ export default function EventDetailPage() {
             </Button>
             <Button variant="destructive" disabled={deleteConfirmTitle !== event.title} onClick={handleDeleteEvent}>
               Delete Permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* RTMP Emergency Unlock Dialog */}
+      <Dialog open={showRtmpResetDialog} onOpenChange={setShowRtmpResetDialog}>
+        <DialogContent className="bg-white border-gray-200 text-gray-900">
+          <DialogHeader>
+            <DialogTitle className="text-red-600 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" /> Emergency Unlock RTMP Session
+            </DialogTitle>
+            <DialogDescription className="text-gray-500">
+              This clears StreamGate&apos;s active publisher lock for &ldquo;{event.title}&rdquo;. It does not disconnect the current RTMP publisher from rtmp-go.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {event.activeRtmpSession && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <p className="font-medium">Active session</p>
+                <p className="mt-1 font-mono break-all">{event.activeRtmpSession.connId || event.activeRtmpSession.id}</p>
+                <p className="mt-1 text-xs text-red-700">Started {new Date(event.activeRtmpSession.startedAt).toLocaleString()}</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <label className="text-sm text-gray-700">Type UNLOCK to confirm:</label>
+              <Input
+                value={rtmpResetConfirm}
+                onChange={(e) => setRtmpResetConfirm(e.target.value)}
+                placeholder="UNLOCK"
+                className="bg-white border-gray-300 text-gray-900"
+              />
+            </div>
+            {rtmpResetError && (
+              <p className="text-sm text-red-600">{rtmpResetError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
+              onClick={() => setShowRtmpResetDialog(false)}
+              disabled={resettingRtmpSession}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={rtmpResetConfirm !== 'UNLOCK' || resettingRtmpSession}
+              onClick={handleResetRtmpSession}
+            >
+              {resettingRtmpSession
+                ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Unlocking...</>
+                : <><Unlock className="h-3.5 w-3.5 mr-1" /> Clear DB Lock</>
+              }
             </Button>
           </DialogFooter>
         </DialogContent>
