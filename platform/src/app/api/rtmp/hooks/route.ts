@@ -10,6 +10,12 @@ type RtmpHookEvent = {
   data?: Record<string, unknown>;
 };
 
+function getConnId(body: RtmpHookEvent): string | null {
+  return typeof body.conn_id === 'string' && body.conn_id.trim().length > 0
+    ? body.conn_id.trim()
+    : null;
+}
+
 /**
  * rtmp-go sends stream keys in `app/streamName` form (for example `live/my-event-a3b2c1d0e9f8`).
  * Streamgate stores only the `streamName` portion in Event.rtmpStreamKeyHash, so the hook receiver
@@ -29,6 +35,10 @@ function extractStreamKeyHash(streamKey: string): string {
  * This endpoint accepts rtmp-go's native hook event format and dispatches
  * by event type. The primary use case is receiving `publish_stop` events
  * to close active RtmpSession records, which unblocks stream reconnection.
+ * The `conn_id` field is important: it identifies one RTMP TCP connection.
+ * We store it on `publish_start`, then require the same value on `publish_stop`
+ * before closing the session. That prevents an old, delayed stop event from
+ * accidentally closing a newer publisher's active stream.
  *
  * Without this endpoint, Streamgate never learns when a stream ends,
  * causing the `already_streaming` error on reconnection attempts.
@@ -73,6 +83,7 @@ export async function POST(request: NextRequest) {
 
   const eventType = typeof body?.type === 'string' ? body.type : 'unknown';
   const rawStreamKey = typeof body?.stream_key === 'string' ? body.stream_key.trim() : '';
+  const connId = getConnId(body);
 
   // Hooks are fire-and-forget. If the payload is malformed, log it and acknowledge the request
   // so a noisy or partial hook payload from rtmp-go does not disrupt the streaming lifecycle.
@@ -105,20 +116,60 @@ export async function POST(request: NextRequest) {
         }
 
         const endedAt = new Date();
-        const updated = await prisma.rtmpSession.updateMany({
-          where: {
+        const activeSessions = await prisma.rtmpSession.findMany({
+          where: { eventId: event.id, endedAt: null },
+          orderBy: { startedAt: 'desc' },
+          select: { id: true, connId: true, startedAt: true },
+        });
+
+        if (activeSessions.length === 0) {
+          console.info('RTMP publish_stop ignored: no active session', {
             eventId: event.id,
-            endedAt: null,
-          },
+            eventTitle: event.title,
+            connId,
+            streamKey: rawStreamKey,
+            streamKeyHash,
+          });
+          return NextResponse.json({ ok: true, action: 'ignored_no_active_session' }, { status: 200 });
+        }
+
+        // Choose exactly which DB sessions this stop hook is allowed to close.
+        // Normally there is one active session and it already has the same conn_id.
+        // The fallback for a single session with no connId keeps older rows working
+        // during rollout, before the first publish_start hook has tagged them.
+        let sessionsToClose = activeSessions;
+        if (connId) {
+          const matchingSessions = activeSessions.filter((session) => session.connId === connId);
+          if (matchingSessions.length > 0) {
+            sessionsToClose = matchingSessions;
+          } else if (activeSessions.length === 1 && !activeSessions[0].connId) {
+            sessionsToClose = activeSessions;
+          } else {
+            console.warn('RTMP publish_stop ignored: stale conn_id mismatch', {
+              eventId: event.id,
+              eventTitle: event.title,
+              connId,
+              activeConnIds: activeSessions.map((session) => session.connId),
+              streamKey: rawStreamKey,
+              streamKeyHash,
+            });
+            return NextResponse.json({ ok: true, action: 'ignored_stale_conn_id' }, { status: 200 });
+          }
+        }
+
+        const updated = await prisma.rtmpSession.updateMany({
+          where: { id: { in: sessionsToClose.map((session) => session.id) } },
           data: {
             endedAt,
+            endedReason: 'publish_stop',
+            endedMetadata: body.data ? JSON.stringify(body.data) : null,
           },
         });
 
         console.info('RTMP publish_stop processed', {
           eventId: event.id,
           eventTitle: event.title,
-          connId: body.conn_id,
+          connId,
           streamKey: rawStreamKey,
           streamKeyHash,
           closedSessions: updated.count,
@@ -132,20 +183,85 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
       }
 
-      case 'publish_start':
+      case 'publish_start': {
+        const event = await prisma.event.findUnique({
+          where: { rtmpStreamKeyHash: streamKeyHash },
+          select: { id: true, title: true },
+        });
+
+        if (!event) {
+          console.info('RTMP publish_start ignored: event not found for stream key', {
+            connId,
+            streamKey: rawStreamKey,
+            streamKeyHash,
+          });
+          return NextResponse.json({ ok: true, action: 'ignored' }, { status: 200 });
+        }
+
+        const activeSessions = await prisma.rtmpSession.findMany({
+          where: { eventId: event.id, endedAt: null },
+          orderBy: { startedAt: 'desc' },
+          select: { id: true, connId: true, startedAt: true },
+        });
+
+        let action = 'logged';
+        if (connId && activeSessions.length === 1) {
+          const activeSession = activeSessions[0];
+          if (!activeSession.connId) {
+            // Auth creates the RtmpSession before rtmp-go starts publishing media.
+            // The auth payload does not include conn_id, so the first publish_start
+            // hook fills it in once rtmp-go knows the connection ID.
+            await prisma.rtmpSession.update({
+              where: { id: activeSession.id },
+              data: { connId, streamKey: rawStreamKey },
+            });
+            action = 'session_tagged';
+          } else if (activeSession.connId === connId) {
+            action = 'already_tagged';
+          } else {
+            action = 'ignored_conn_id_mismatch';
+            console.warn('RTMP publish_start ignored: active session has different conn_id', {
+              eventId: event.id,
+              eventTitle: event.title,
+              connId,
+              activeConnId: activeSession.connId,
+              streamKey: rawStreamKey,
+              streamKeyHash,
+            });
+          }
+        } else if (!connId) {
+          action = 'ignored_missing_conn_id';
+        } else if (activeSessions.length === 0) {
+          action = 'ignored_no_active_session';
+        } else {
+          action = 'ignored_ambiguous_active_sessions';
+          console.warn('RTMP publish_start ignored: ambiguous active sessions', {
+            eventId: event.id,
+            eventTitle: event.title,
+            connId,
+            activeSessionCount: activeSessions.length,
+            streamKey: rawStreamKey,
+            streamKeyHash,
+          });
+        }
+
         console.info('RTMP publish_start received', {
-          connId: body.conn_id,
+          eventId: event.id,
+          eventTitle: event.title,
+          action,
+          connId,
           streamKey: rawStreamKey,
           streamKeyHash,
           timestamp: body.timestamp,
           data: body.data,
         });
-        return NextResponse.json({ ok: true, action: 'logged' }, { status: 200 });
+        return NextResponse.json({ ok: true, action }, { status: 200 });
+      }
 
       default:
         console.info('RTMP hook ignored: unsupported type', {
           type: eventType,
-          connId: body.conn_id,
+          connId,
           streamKey: rawStreamKey,
           streamKeyHash,
         });
@@ -154,7 +270,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Failed to process RTMP hook event', {
       type: eventType,
-      connId: body.conn_id,
+      connId,
       streamKey: rawStreamKey,
       streamKeyHash,
       error,

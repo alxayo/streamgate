@@ -193,7 +193,10 @@ export async function POST(request: NextRequest) {
         endedAt: null,
         startedAt: { lt: staleThreshold },
       },
-      data: { endedAt: staleThreshold },
+      data: {
+        endedAt: staleThreshold,
+        endedReason: 'stale_timeout',
+      },
     });
 
     const activeSessions = await prisma.rtmpSession.findMany({
@@ -216,6 +219,7 @@ export async function POST(request: NextRequest) {
         data: {
           eventId: event.id,
           rtmpPublisherIp: publisherIp || 'unknown',
+          streamKey: streamKeyHash,
         },
       });
     } catch (error) {
